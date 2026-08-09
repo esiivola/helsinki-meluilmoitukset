@@ -1,0 +1,68 @@
+name: Update noise notices
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - scripts/**
+      - .github/workflows/update-noise-data.yml
+  schedule:
+    # Daily, off the hour. The schedule event is delayed or dropped when Actions
+    # is under load, and the top of the hour is the worst time to ask.
+    - cron: '23 4 * * *'
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: Re-read the whole decision archive instead of the recent pages
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: noise-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Collect decisions
+        run: node scripts/update-noise-data.mjs ${{ inputs.backfill && '--backfill' || '' }}
+
+      # index.json carries the run timestamp, so this commit is never empty. That
+      # matters: GitHub disables scheduled workflows in a public repository after
+      # 60 days without repository activity, and a daily commit is that activity.
+      # The commit stays small because the chunk files and the archive are written
+      # without timestamps and only change when their content does.
+      - name: Commit updated data
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/decisions.json public/data
+          if git diff --cached --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "Update noise notice data"
+            git push
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Deploy updated data
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-pages.yml --ref main

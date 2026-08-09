@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-08-09T14:44:28.372Z",
+  "totalNotices": 1485,
+  "currentLookbackDays": 30,
+  "chunks": [
+    {
+      "key": "current",
+      "file": "notices-current.json",
+      "from": "2026-07-10",
+      "to": null,
+      "count": 103,
+      "hash": "157q1up"
+    },
+    {
+      "key": "2029",
+      "file": "notices-2029.json",
+      "from": "2029-01-01",
+      "to": "2029-12-31",
+      "count": 3,
+      "hash": "tjzqrc"
+    },
+    {
+      "key": "2028",
+      "file": "notices-2028.json",
+      "from": "2028-01-01",
+      "to": "2028-12-31",
+      "count": 9,
+      "hash": "1lem2co"
+    },
+    {
+      "key": "2027",
+      "file": "notices-2027.json",
+      "from": "2027-01-01",
+      "to": "2027-12-31",
+      "count": 32,
+      "hash": "exb5te"
+    },
+    {
+      "key": "2026",
+      "file": "notices-2026.json",
+      "from": "2026-01-01",
+      "to": "2026-12-31",
+      "count": 176,
+      "hash": "d7ln0g"
+    },
+    {
+      "key": "2025",
+      "file": "notices-2025.json",
+      "from": "2025-01-01",
+      "to": "2025-12-31",
+      "count": 180,
+      "hash": "yrqrf1"
+    },
+    {
+      "key": "2024",
+      "file": "notices-2024.json",
+      "from": "2024-01-01",
+      "to": "2024-12-31",
+      "count": 173,
+      "hash": "dvyj1x"
+    },
+    {
+      "key": "2023",
+      "file": "notices-2023.json",
+      "from": "2023-01-01",
+      "to": "2023-12-31",
+      "count": 178,
+      "hash": "w2ih7c"
+    },
+    {
+      "key": "2022",
+      "file": "notices-2022.json",
+      "from": "2022-01-01",
+      "to": "2022-12-31",
+      "count": 226,
+      "hash": "1tcd0f3"
+    },
+    {
+      "key": "2021",
+      "file": "notices-2021.json",
+      "from": "2021-01-01",
+      "to": "2021-12-31",
+      "count": 218,
+      "hash": "1cmzxdi"
+    },
+    {
+      "key": "2020",
+      "file": "notices-2020.json",
+      "from": "2020-01-01",
+      "to": "2020-12-31",
+      "count": 207,
+      "hash": "k02q77"
+    },
+    {
+      "key": "2019",
+      "file": "notices-2019.json",
+      "from": "2019-01-01",
+      "to": "2019-12-31",
+      "count": 208,
+      "hash": "13vurpl"
+    },
+    {
+      "key": "2018",
+      "file": "notices-2018.json",
+      "from": "2018-01-01",
+      "to": "2018-12-31",
+      "count": 169,
+      "hash": "6k5nuk"
+    },
+    {
+      "key": "2017",
+      "file": "notices-2017.json",
+      "from": "2017-01-01",
+      "to": "2017-12-31",
+      "count": 156,
+      "hash": "3kd9qh"
+    },
+    {
+      "key": "2016",
+      "file": "notices-2016.json",
+      "from": "2016-01-01",
+      "to": "2016-12-31",
+      "count": 3,
+      "hash": "146abdt"
+    },
+    {
+      "key": "2015",
+      "file": "notices-2015.json",
+      "from": "2015-01-01",
+      "to": "2015-12-31",
+      "count": 2,
+      "hash": "1hzu5if"
+    }
+  ]
+}
