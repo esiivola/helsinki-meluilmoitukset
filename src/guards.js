@@ -59,17 +59,11 @@ export function polygonAreaKm2(polygon) {
   return Math.abs(twiceArea) / 2;
 }
 
-function noticeCategories(notice) {
-  return Array.isArray(notice?.categories) && notice.categories.length
-    ? notice.categories
-    : [notice?.category || 'other'];
-}
-
-// An empty category list means every type, which keeps a freshly drawn watch useful
+// An empty type list means every type, which keeps a freshly drawn watch useful
 // before the reader narrows it.
 export function matchesCategories(notice, categories) {
   if (!Array.isArray(categories) || !categories.length) return true;
-  return noticeCategories(notice).some((category) => categories.includes(category));
+  return categories.includes(notice?.category || 'other');
 }
 
 export function noticeInArea(notice, polygon) {

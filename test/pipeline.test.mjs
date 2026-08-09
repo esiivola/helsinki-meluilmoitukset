@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  classifyAll, decisionClause, extractDecision, hasNightWork, htmlToText,
-  isPublishable, parseHourWindows, parsePeriod, parseSubject, primaryCategory,
+  classify, decisionClause, extractDecision, hasNightWork, htmlToText,
+  isPublishable, parseHourWindows, parsePeriod, parseSubject,
 } from '../scripts/lib/extract.mjs';
 import { areaForms, buildIndex, locateAll, normalize, titleCase } from '../scripts/lib/geocode.mjs';
 import { buildChunks, buildManifest, contentHash, isCurrent, noticeSpan, serialiseChunk, shiftDays, yearsCovered } from '../scripts/lib/publish.mjs';
@@ -55,27 +55,32 @@ describe('text extraction', () => {
   });
 
   it('classifies from the subject, not the boilerplate conditions', () => {
-    // Every construction decision repeats "eikä niihin rinnastettavina juhlapäivinä".
-    expect(classifyAll('kiskotyötä Hämeentien risteyksessä', 'ei saa tehdä pyhäpäivinä eikä juhlapäivinä')).toEqual(['rail']);
-    expect(classifyAll('louhintaa osoitteessa Kirkonkyläntie 17', 'juhlapäivinä')).toEqual(['blasting']);
-    expect(classifyAll('yrityksen kesäjuhlan ulkoilmakonserttia', '')).toEqual(['event']);
-    expect(classifyAll('kaivinkoneen siirtoa', '')).toEqual(['other']);
+    // Every construction decision repeats "eika niihin rinnastettavina juhlapaivina".
+    expect(classify('kiskotyötä Hämeentien risteyksessä', 'ei saa tehdä pyhäpäivinä')).toBe('construction');
+    expect(classify('louhintaa osoitteessa Kirkonkyläntie 17', '')).toBe('construction');
+    expect(classify('yrityksen kesäjuhlan ulkoilmakonserttia', '')).toBe('event');
+    expect(classify('aiemman ilmoituksen jatkumista', '')).toBe('other');
   });
 
-  it('keeps every kind of noise a decision permits, most defining first', () => {
-    // A quarter of decisions cover several distinct activities at once.
-    expect(classifyAll('louhintaa, paalutusta ja purkutyötä', ''))
-      .toEqual(['blasting', 'piling', 'demolition']);
-    expect(classifyAll('injektointiporausta sekä hydraulista iskuvasarointia', ''))
-      .toEqual(['crushing', 'drilling']);
-    // The operative clause runs into the conditions, which name unrelated work;
-    // it must not leak into the labels when the subject already states the activity.
-    expect(classifyAll('suurtehoimurointia osoitteessa Abrahaminkatu 2', 'louhintaa, paalutusta ja porausta koskevat määräykset'))
-      .toEqual(['earthworks']);
-    // Older subjects carry no activity part, so the clause is the only signal.
-    expect(classifyAll('', 'louhintaa osoitteessa Testikatu 1')).toEqual(['blasting']);
-    expect(primaryCategory(classifyAll('louhintaa ja murskausta', ''))).toBe('blasting');
-    expect(primaryCategory([])).toBe('other');
+  it('ignores the address, which carries place names that read as activities', () => {
+    // Katajanokanlaituri is a street, not a pier under construction.
+    expect(classify('ulkoilmakonserttia osoitteessa Katajanokanlaituri 2a', '')).toBe('event');
+    // Messuaukio is a square, not a trade fair.
+    expect(classify('piikkausta ja suurtehoimurointia osoitteessa Messuaukio 1', '')).toBe('construction');
+  });
+
+  it('matches the Finnish spelling of a loan word', () => {
+    // "festivaali" does not contain the English "festival".
+    expect(classify('Teurastamo Festivaalia', '')).toBe('event');
+    expect(classify('Electronic Fields Festivalia', '')).toBe('event');
+  });
+
+  it('prefers the event reading when both patterns could match', () => {
+    expect(classify('Under the Bridge ulkoilmatapahtumaa Hämeentien sillan alla', '')).toBe('event');
+  });
+
+  it('falls back to the whole subject when there is no activity part', () => {
+    expect(classify('', 'Kalliolan Nuoret Ry meluilmoitus, ulkoilmatapahtuma Alppipuistossa')).toBe('event');
   });
 
   it('detects night work and the operative clause', () => {
@@ -162,14 +167,13 @@ describe('end-to-end extraction over real decisions', () => {
     expect(record).toMatchObject({
       issueId: 'HEL-2026-012622',
       applicant: 'Uudenmaan Infrapalvelut Oy',
-      category: 'crushing',
+      category: 'construction',
       start: '2026-08-10',
       end: '2026-09-30',
       periodConfidence: 'high',
       nightWork: false,
     });
     expect(record.url).toMatch(/^https:\/\/paatokset\.hel\.fi\/fi\/asia\/hel-2026-012622/);
-    expect(record.categories).toEqual(['crushing', 'drilling']);
     expect(record.hours).toContainEqual({ kind: 'allowed', from: '07:00', to: '15:00' });
 
     const [spot] = locateAll(index, record.locationText);

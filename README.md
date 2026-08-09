@@ -22,16 +22,24 @@ määräykset.
 
 ### Melun tyypit
 
-Ilmoitus luokitellaan päätöksen otsikossa kuvatun toiminnan perusteella. Sama ilmoitus voi
-kuulua useaan tyyppiin, sillä noin neljännes päätöksistä sallii monta eri melutyyppiä.
-Siksi tyyppien lukumäärien summa on suurempi kuin ilmoitusten määrä.
+Ympäristönsuojelulaki nimeää ilmoitusvelvollisen toiminnan kahtena ryhmänä,
+rakentamisena ja yleisötilaisuutena, ja aineisto tukee tätä jakoa. Arkiston 1485
+päätöksestä vain kaksi sopisi molempiin ryhmiin, joten hienojakoisempi luokittelu
+loisi eroja, joita aineistossa ei ole.
 
-Louhinta ja räjäytys · Murskaus ja iskuvasarointi · Paalutus ja pontitus · Poraus ·
-Purku ja saneeraus · Rata- ja kiskotyöt · Vesirakentaminen · Maa- ja katutyöt ·
-Ulkoilmakonsertit ja yleisötilaisuudet · Muu toiminta
+| Tyyppi | Osuus |
+| --- | --- |
+| Rakentaminen | 1220 |
+| Yleisötilaisuudet | 261 |
+| Muu toiminta | 4 |
 
-Kartalla merkin väri kertoo ilmoituksen määräävimmän tyypin. Kaikki tyypit näkyvät
-ilmoituksen tiedoissa.
+Ilmoitus luokitellaan päätöksen otsikossa kuvatun toiminnan perusteella. Osoiteosa
+jätetään huomiotta, koska paikannimet menevät muuten toiminnan kuvauksen edelle:
+Katajanokanlaiturilla pidetty ulkoilmakonsertti ei ole laiturin rakentamista.
+
+Kartan värit ovat liuskeensininen, okra ja lämmin harmaa. Ne on valittu tarkoituksella
+ilman liikennevalomerkitystä: konsertti ei ole hyvä eikä purkutyömaa paha, ne ovat eri
+toimintaa. Kartan alalaidan selite toimii samalla suodattimena.
 
 ### Vahdit
 

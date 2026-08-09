@@ -12,7 +12,7 @@ const AREA = [[60.160, 24.920], [60.160, 24.945], [60.172, 24.945], [60.172, 24.
 const notice = (id, overrides = {}) => ({
   id,
   title: `Notice ${id}`,
-  categories: ['blasting'],
+  category: 'construction',
   decisionDate: '2026-08-20',
   locations: [{ lat: 60.165, lon: 24.930, precision: 'address', label: 'Testikatu 1' }],
   ...overrides,
@@ -74,16 +74,12 @@ describe('matching a notice to a watch', () => {
   it('treats an empty type list as every type', () => {
     expect(matchesCategories(notice('a'), [])).toBe(true);
     expect(matchesCategories(notice('a'), ['event'])).toBe(false);
-    expect(matchesCategories(notice('a'), ['event', 'blasting'])).toBe(true);
+    expect(matchesCategories(notice('a'), ['event', 'construction'])).toBe(true);
   });
 
-  it('matches a multi-type notice on any of its types', () => {
-    const mixed = notice('a', { categories: ['piling', 'event'] });
-    expect(matchesCategories(mixed, ['event'])).toBe(true);
-  });
-
-  it('falls back to the single primary type on older cached records', () => {
-    expect(matchesCategories({ category: 'rail' }, ['rail'])).toBe(true);
+  it('treats an unknown or missing type as other', () => {
+    expect(matchesCategories({ category: 'event' }, ['event'])).toBe(true);
+    expect(matchesCategories({}, ['other'])).toBe(true);
   });
 
   it('matches when any one of several sites falls inside the area', () => {
@@ -100,7 +96,7 @@ describe('matching a notice to a watch', () => {
   it('requires both the area and the type to match', () => {
     const watch = guard({ categories: ['event'] });
     expect(noticeMatchesGuard(notice('a'), watch)).toBe(false);
-    expect(noticeMatchesGuard(notice('b', { categories: ['event'] }), watch)).toBe(true);
+    expect(noticeMatchesGuard(notice('b', { category: 'event' }), watch)).toBe(true);
   });
 });
 
@@ -157,9 +153,9 @@ describe('what a watch reports', () => {
   });
 
   it('keeps several watches independent and totals them', () => {
-    const home = guard({ id: 'vahti-1', categories: ['blasting'] });
+    const home = guard({ id: 'vahti-1', categories: ['construction'] });
     const work = guard({ id: 'vahti-2', categories: ['event'] });
-    const notices = [notice('a'), notice('b', { categories: ['event'] })];
+    const notices = [notice('a'), notice('b', { category: 'event' })];
 
     const perGuard = pendingByGuard(notices, [home, work]);
     expect(perGuard[0].notices.map((item) => item.id)).toEqual(['a']);

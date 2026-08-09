@@ -4,7 +4,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
   AlertTriangle, Bell, CalendarClock, Check, ChevronDown, ExternalLink, Info,
-  LocateFixed, MapPin, Moon, Pencil, RefreshCw, SlidersHorizontal, Trash2, X,
+  LocateFixed, MapPin, Moon, Pencil, RefreshCw, Trash2, X,
 } from 'lucide-react';
 import {
   boundsToPolygon, clearAllGuards, clearGuard, createGuard, acknowledgeNotices, nextGuardId,
@@ -21,23 +21,15 @@ const CHUNK_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 const RANGE_SETTLE_MS = 400;
 const MIN_AREA_POINTS = 3;
 
-// Ordered as the collector orders them, so the first type on a notice is the one
-// that colours its marker.
-const CATEGORY_ORDER = [
-  'blasting', 'crushing', 'piling', 'drilling', 'demolition',
-  'rail', 'marine', 'earthworks', 'event', 'other',
-];
+const CATEGORY_ORDER = ['construction', 'event', 'other'];
+// Slate, ochre and warm grey. The palette is deliberately free of traffic-light
+// meaning: a concert is not "good" and a demolition site is not "bad", they are
+// simply different activities. Blue against ochre also stays separable for the
+// common forms of colour vision deficiency.
 const CATEGORY_COLOURS = {
-  blasting: '#a32b1f',
-  crushing: '#c85c2b',
-  piling: '#b08114',
-  drilling: '#8a7b22',
-  demolition: '#7a5340',
-  rail: '#2457d6',
-  marine: '#157a72',
-  earthworks: '#6d7355',
-  event: '#17735a',
-  other: '#68716b',
+  construction: '#33566f',
+  event: '#9d7b2f',
+  other: '#8b918d',
 };
 const IMPRECISE = new Set(['district', 'street']);
 
@@ -206,27 +198,20 @@ export function unlocatedNotices(notices) {
   return notices.filter((notice) => !notice.locations?.length);
 }
 
-// Records cached before multi-type classification carry only the primary type.
-export function noticeCategories(notice) {
-  return Array.isArray(notice.categories) && notice.categories.length
-    ? notice.categories
-    : [notice.category || 'other'];
+export function noticeCategory(notice) {
+  return CATEGORY_ORDER.includes(notice?.category) ? notice.category : 'other';
 }
 
-// A notice counts towards every type it carries, so these totals sum to more than
-// the number of notices. That is the honest reading of the data.
 export function categoryCounts(notices) {
-  const counts = new Map();
+  const counts = new Map(CATEGORY_ORDER.map((category) => [category, 0]));
   for (const notice of notices) {
-    for (const category of noticeCategories(notice)) {
-      counts.set(category, (counts.get(category) || 0) + 1);
-    }
+    counts.set(noticeCategory(notice), counts.get(noticeCategory(notice)) + 1);
   }
   return counts;
 }
 
 export function matchesFilter(notice, hidden) {
-  return noticeCategories(notice).some((category) => !hidden.has(category));
+  return !hidden.has(noticeCategory(notice));
 }
 
 export function describeArea(polygon, t) {
@@ -274,16 +259,10 @@ const copy = {
     decided: 'Päätös annettu',
     openDecision: 'Avaa päätös',
     filters: 'Rajaa melun tyypin mukaan',
+    customPeriod: 'Oma ajanjakso',
     categories: 'Melun tyyppi',
-    blasting: 'Louhinta ja räjäytys',
-    crushing: 'Murskaus ja iskuvasarointi',
-    piling: 'Paalutus ja pontitus',
-    drilling: 'Poraus',
-    demolition: 'Purku ja saneeraus',
-    rail: 'Rata- ja kiskotyöt',
-    marine: 'Vesirakentaminen',
-    earthworks: 'Maa- ja katutyöt',
-    event: 'Ulkoilmakonsertit ja yleisötilaisuudet',
+    construction: 'Rakentaminen',
+    event: 'Yleisötilaisuudet',
     other: 'Muu toiminta',
     approximate: 'Sijainti on likimääräinen.',
     unlocated: 'Ilmoitukset ilman sijaintia',
@@ -360,16 +339,10 @@ const copy = {
     decided: 'Decision issued',
     openDecision: 'Open the decision',
     filters: 'Filter by type of noise',
+    customPeriod: 'Custom period',
     categories: 'Type of noise',
-    blasting: 'Blasting and rock excavation',
-    crushing: 'Crushing and hammering',
-    piling: 'Piling and sheet piling',
-    drilling: 'Drilling',
-    demolition: 'Demolition and renovation',
-    rail: 'Track and rail works',
-    marine: 'Marine construction',
-    earthworks: 'Earthworks and street works',
-    event: 'Outdoor concerts and public events',
+    construction: 'Construction',
+    event: 'Public events',
     other: 'Other activity',
     approximate: 'The location is approximate.',
     unlocated: 'Notifications without a location',
@@ -495,9 +468,8 @@ function useNoticeData(range) {
 
 /* ------------------------------------------------------------------ markers */
 
-function markerIcon(group, label) {
-  const category = noticeCategories(group.notices[0] || {})[0];
-  const colour = CATEGORY_COLOURS[category] || CATEGORY_COLOURS.other;
+function markerIcon(group) {
+  const colour = CATEGORY_COLOURS[noticeCategory(group.notices[0])];
   const imprecise = IMPRECISE.has(group.location.precision);
   const count = group.notices.length;
   return L.divIcon({
@@ -510,26 +482,16 @@ function markerIcon(group, label) {
 
 /* ----------------------------------------------------------- small elements */
 
-function CategoryChips({ categories, t }) {
-  return (
-    <ul className="category-chips">
-      {categories.map((category) => (
-        <li key={category}>
-          <span className="chip-dot" style={{ background: CATEGORY_COLOURS[category] }} aria-hidden="true" />
-          {t[category]}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function NoticeCard({ notice, t, locale, label, action }) {
   const hours = displayHours(notice.hours);
   return (
     <article className="notice-card">
       <h3>{notice.activity || notice.title}</h3>
       {label && <p className="notice-address">{label}</p>}
-      <CategoryChips categories={noticeCategories(notice)} t={t} />
+      <p className="category-chip">
+        <span className="chip-dot" style={{ background: CATEGORY_COLOURS[noticeCategory(notice)] }} aria-hidden="true" />
+        {t[noticeCategory(notice)]}
+      </p>
       <dl>
         <div>
           <dt>{t.validity}</dt>
@@ -603,7 +565,6 @@ function PeriodControl({ range, setRange, t, locale }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
-  const presets = rangePresets(t, today);
   const summary = formatRange(range, locale);
 
   return (
@@ -624,18 +585,7 @@ function PeriodControl({ range, setRange, t, locale }) {
       </button>
       {open && (
         <div className="period-popover" id="period-popover">
-          <div className="preset-grid">
-            {presets.map((preset) => (
-              <button
-                key={preset.key}
-                type="button"
-                className={activePresetKey(range, presets) === preset.key ? 'active' : ''}
-                onClick={() => { setRange({ from: preset.from, to: preset.to }); setOpen(false); }}
-              >
-                {preset.label}
-              </button>
-            ))}
-          </div>
+          <p className="popover-title">{t.customPeriod}</p>
           <div className="date-fields">
             <label>
               <span>{t.from}</span>
@@ -813,7 +763,7 @@ function App() {
     for (const group of groups) {
       const label = `${group.location.label || ''} (${group.notices.length})`;
       const marker = L.marker([group.location.lat, group.location.lon], {
-        icon: markerIcon(group, label),
+        icon: markerIcon(group),
         keyboard: true,
         title: label,
         alt: label,
@@ -910,16 +860,7 @@ function App() {
             <Bell size={18} aria-hidden="true" />
             {pendingCount > 0 && <span className="badge">{pendingCount}</span>}
           </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={t.filters}
-            aria-expanded={panel === 'filters'}
-            onClick={() => setPanel(panel === 'filters' ? null : 'filters')}
-          >
-            <SlidersHorizontal size={18} aria-hidden="true" />
-          </button>
-          <button type="button" className="icon-button" aria-label={t.locate} onClick={locateMe}>
+          <button type="button" className="icon-button locate" aria-label={t.locate} onClick={locateMe}>
             <LocateFixed size={18} aria-hidden="true" />
           </button>
           <button
@@ -1038,18 +979,6 @@ function App() {
           </div>
         )}
       </main>
-
-      {panel === 'filters' && (
-        <Overlay id="filters" title={t.categories} onClose={() => setPanel(null)} t={t} className="side">
-          <CategoryPicker
-            idPrefix="filter"
-            selected={(category) => !hidden.has(category)}
-            toggle={toggleHidden}
-            counts={counts}
-            t={t}
-          />
-        </Overlay>
-      )}
 
       {panel === 'watches' && (
         <Overlay id="watches" title={t.watches} onClose={() => setPanel(null)} t={t} className="side">
@@ -1215,9 +1144,25 @@ function App() {
         </Overlay>
       )}
 
-      <footer className="disclaimer">
-        <AlertTriangle size={16} aria-hidden="true" />
-        <p>{t.disclaimer}</p>
+      <footer className="bottom-bar">
+        <div className="legend" role="group" aria-label={t.filters}>
+          {CATEGORY_ORDER.map((category) => (
+            <button
+              key={category}
+              type="button"
+              aria-pressed={!hidden.has(category)}
+              onClick={() => toggleHidden(category)}
+            >
+              <span className="chip-dot" style={{ background: CATEGORY_COLOURS[category] }} aria-hidden="true" />
+              {t[category]}
+              <b>{counts.get(category) || 0}</b>
+            </button>
+          ))}
+        </div>
+        <p className="disclaimer">
+          <AlertTriangle size={15} aria-hidden="true" />
+          {t.disclaimer}
+        </p>
       </footer>
     </div>
   );
@@ -1244,7 +1189,7 @@ const styles = `
   .map.drawing{cursor:crosshair}
   .leaflet-container{font-family:inherit;background:#dfe3df}
   .leaflet-control-attribution{font-size:11px!important;background:rgba(251,250,247,.82)!important;color:#5b645e!important}
-  .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 18px 92px 0!important}
+  .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 18px 104px 0!important}
   .leaflet-control-zoom a{border:0!important;color:#19201c!important;background:#faf9f5!important}
 
   .topbar{position:absolute;z-index:600;left:50%;top:18px;width:min(880px,calc(100% - 36px));display:flex;align-items:center;gap:12px;padding:9px 10px;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
@@ -1263,10 +1208,8 @@ const styles = `
   .period-control small{color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
   .period-control strong{margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:650}
   .period-popover{position:absolute;z-index:720;top:52px;left:0;width:min(360px,calc(100vw - 24px));padding:16px;border:1px solid rgba(255,255,255,.9);border-radius:16px;background:var(--paper);box-shadow:0 18px 54px rgba(22,31,26,.2)}
-  .preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .preset-grid button{height:42px;border:1px solid var(--line);border-radius:11px;background:var(--paper);color:var(--ink);font-size:13px;cursor:pointer}
-  .preset-grid button.active{border-color:#1d2923;background:#1d2923;color:var(--paper)}
-  .date-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .popover-title{margin:0 0 10px;color:var(--muted);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+  .date-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .date-fields label,.field{display:flex;flex-direction:column;gap:6px}
   .date-fields span,.field>span{color:var(--muted);font-size:12px}
   .date-fields input,.field input{height:44px;padding:0 11px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);font:650 14px inherit}
@@ -1285,7 +1228,7 @@ const styles = `
   .quick-ranges button:hover{background:#f0efe9}
   .quick-ranges button[aria-pressed=true]{background:#1d2923;color:var(--paper)}
 
-  .panel{position:absolute;z-index:500;left:18px;top:140px;bottom:92px;width:392px;overflow:auto;scrollbar-width:none}
+  .panel{position:absolute;z-index:500;left:18px;top:140px;bottom:104px;width:392px;overflow:auto;scrollbar-width:none}
   .panel::-webkit-scrollbar{display:none}
   .card{position:relative;padding:22px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 16px 46px rgba(24,33,28,.16)}
   .card.message{display:flex;flex-direction:column;gap:12px;color:var(--muted);font-size:14px}
@@ -1303,8 +1246,7 @@ const styles = `
   .notice-card{padding:16px 0;border-top:1px solid var(--line)}
   .notice-card h3{margin:0;font-size:15px;line-height:1.4}
   .notice-address{margin:6px 0 0;color:var(--muted);font-size:13px}
-  .category-chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0;padding:0;list-style:none}
-  .category-chips li{display:flex;align-items:center;gap:6px;padding:4px 9px;border-radius:8px;background:#f0efe9;font-size:12px}
+  .category-chip{display:inline-flex;align-items:center;gap:7px;margin:10px 0 0;padding:4px 10px;border-radius:8px;background:#f0efe9;font-size:12px}
   .chip-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
   .notice-card dl{display:flex;flex-wrap:wrap;gap:8px;margin:11px 0 0}
   .notice-card dl div{flex:1 1 auto;min-width:110px;padding:9px 11px;border-radius:10px;background:#f0efe9}
@@ -1316,7 +1258,7 @@ const styles = `
 
   .overlay{position:absolute;z-index:700;padding:20px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 22px 60px rgba(22,31,26,.24);overflow:auto;scrollbar-width:none}
   .overlay::-webkit-scrollbar{display:none}
-  .overlay.side{right:18px;top:140px;bottom:92px;width:392px}
+  .overlay.side{right:18px;top:140px;bottom:104px;width:392px}
   .overlay.centre{left:50%;top:50%;width:min(480px,calc(100% - 36px));max-height:min(76vh,720px);transform:translate(-50%,-50%)}
   .overlay-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
   .overlay-head h2{margin:0;font-size:19px;outline:0}
@@ -1350,16 +1292,23 @@ const styles = `
   fieldset{margin:14px 0 0;padding:0;border:0}
   legend{padding:0;color:var(--muted);font-size:12px}
 
-  .draw-bar{position:absolute;z-index:650;left:50%;bottom:84px;width:min(620px,calc(100% - 36px));display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:16px;background:var(--paper);box-shadow:0 16px 46px rgba(24,33,28,.2);transform:translateX(-50%)}
+  .draw-bar{position:absolute;z-index:650;left:50%;bottom:96px;width:min(620px,calc(100% - 36px));display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:16px;background:var(--paper);box-shadow:0 16px 46px rgba(24,33,28,.2);transform:translateX(-50%)}
   .draw-bar p{display:flex;flex-direction:column;gap:4px;margin:0;font-size:13px}
   .draw-bar strong{font-size:14px}
   .draw-bar span{color:var(--muted)}
   .draw-actions{display:flex;flex-wrap:wrap;gap:8px}
   .draw-actions .primary{width:auto;height:40px;margin:0}
 
-  .disclaimer{position:absolute;z-index:600;left:18px;right:18px;bottom:16px;display:flex;align-items:center;gap:11px;padding:12px 16px;background:#1a1f1c;border-radius:12px;color:#f3f1e9;box-shadow:0 8px 30px rgba(16,21,18,.22)}
-  .disclaimer>svg{flex:0 0 auto;color:#f2b64b}
-  .disclaimer p{margin:0;font-size:13px;line-height:1.5}
+  .bottom-bar{position:absolute;z-index:600;left:18px;right:18px;bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:10px 14px;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:14px;box-shadow:0 8px 30px rgba(28,38,32,.13);backdrop-filter:blur(16px)}
+  .legend{display:flex;gap:6px;flex:0 0 auto;overflow-x:auto;scrollbar-width:none}
+  .legend::-webkit-scrollbar{display:none}
+  .legend button{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);font-size:13px;white-space:nowrap;cursor:pointer;transition:opacity .15s}
+  .legend button:hover{background:#f0efe9}
+  .legend button[aria-pressed=false]{opacity:.42}
+  .legend button[aria-pressed=false] .chip-dot{background:#b7bcb8!important}
+  .legend b{color:var(--muted);font-weight:650}
+  .disclaimer{display:flex;align-items:center;gap:9px;margin:0;color:var(--muted);font-size:12px;line-height:1.5;text-align:right}
+  .disclaimer>svg{flex:0 0 auto;color:#a97c2f}
 
   .melu-marker{display:grid;place-items:center;width:26px;height:26px;border:2.5px solid var(--paper);border-radius:50%;background:var(--dot);color:#fff;font-size:12px;font-weight:700;box-shadow:0 4px 12px rgba(18,26,22,.3)}
   /* Approximate points read as hollow, so a district centroid is never mistaken
@@ -1372,13 +1321,14 @@ const styles = `
     .topbar{left:12px;right:12px;top:12px;width:auto;transform:none}
     .brand-text{display:none}
     .quick-ranges{left:12px;right:12px;max-width:none;top:78px;justify-content:flex-start;transform:none}
-    .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:88px;width:auto;max-height:52vh}
+    .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:132px;width:auto;max-height:52vh}
     /* On one column the results and a side panel would stack on top of each other. */
     .panel.behind{display:none}
-    .disclaimer{left:12px;right:12px;bottom:12px;padding:10px 12px}
-    .disclaimer p{font-size:12px}
-    .draw-bar{left:12px;right:12px;bottom:78px;width:auto;transform:none}
-    .leaflet-control-zoom{margin:0 12px 150px 0!important}
+    .bottom-bar{left:12px;right:12px;bottom:12px;flex-direction:column;align-items:stretch;gap:9px;padding:9px 10px}
+    .legend{justify-content:flex-start}
+    .disclaimer{text-align:left;font-size:11px}
+    .draw-bar{left:12px;right:12px;bottom:124px;width:auto;transform:none}
+    .leaflet-control-zoom{margin:0 12px 190px 0!important}
   }
 
   .lang-short{display:none}
@@ -1390,8 +1340,9 @@ const styles = `
     .lang-short{display:inline}
     .icon-button{width:40px;height:40px}
     .summary h1{font-size:34px}
-    /* The period and the watch bell must stay reachable; locating is a convenience. */
-    .top-actions .icon-button:nth-of-type(3){display:none}
+    /* The period, the watches and the information must stay reachable at this
+       width; centring on your own location is the one convenience that can go. */
+    .icon-button.locate{display:none}
     .period-control strong{font-size:13px}
   }
 

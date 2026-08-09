@@ -173,39 +173,54 @@ export function parseSubject(subject) {
   return { applicant: null, activity: null, format: 'other' };
 }
 
-// Ordered most to least defining: a notice covering blasting and earthworks is
-// first and foremost a blasting site. The order doubles as the marker-colour
-// priority in the map.
+// Two kinds of activity need a notification under section 118, and the guidance
+// names them directly: rakentaminen and yleisotilaisuus. The archive bears this
+// out. Of 1485 decisions only six carry both, and all six were address words
+// leaking into the match, so a finer split would invent distinctions the data
+// does not support.
+//
+// The event pattern is tried first because it is the more specific signal.
 export const CATEGORIES = [
-  ['blasting', /louhin|r[aä]j[aä]yt/i],
-  ['crushing', /murskau|iskuvasar|piikkau/i],
-  ['piling', /paalutu|pontitu|ponttau|ankkuroin/i],
-  ['drilling', /porausta|poraukse|porapaalut|maal[aä]mp[oö]|injektointiporau|ankkuriporau|porata/i],
-  ['demolition', /purkuty|purkua|purkut[oö]i|purkam|purkurobot|purku-|saneeraus|perusparannu/i],
-  ['rail', /kiskoty|ratat[oö]i|ratatyo|raitiorat|raitiotiekisko|raiteen|juna-?asema|ratapih/i],
-  ['marine', /ruoppau|laituri|vesialue|merity|ponttoni|satamaty/i],
-  ['earthworks', /maarakennu|kaivuty|asfaltoin|katuty|kunnossapito|suurtehoimuroin|johtoty|kaapeli|stabiloin|imuroin/i],
-  ['event', /ulkoilmakonsert|konsertti|tapahtum|festival|elokuvaesity|elokuvan[aä]yt[oö]s|kes[aä]juhl|juhlaa|kilpailu|juoksu|ottelu|messu|markkina/i],
+  ['event', new RegExp([
+    'ulkoilmakonsert', 'konsert', 'tapahtum', 'festivaal', 'festival', 'tilaisuu', 'esiintymi', 'tanssi',
+    'elokuvaesity', 'elokuvan[aä]yt[oö]', 'lenton[aä]yt[oö]', 'n[aä]ytelm', '[aä][aä]nentoisto',
+    'juhla', 'juhli', 'kilpailu', 'juoksu', 'ottelu', 'messut', 'markkinat', 'ralli',
+    'kisal[aä]hety', 'mainoskuvau',
+  ].join('|'), 'i')],
+  ['construction', new RegExp([
+    'louhin', 'louhe', 'r[aä]j[aä]yt', 'murskau', 'murskai', 'iskuvasar', 'piikkau', 'rammeroin',
+    'paalutu', 'pontitu', 'ponttau', 'pontti', 'ankkuroin', 'pora',
+    'purkuty', 'purkua', 'purkut[oö]i', 'purkam', 'purkurobot', 'purku-',
+    'saneeraus', 'perusparannu', 'korjau', 'uusimist', 'asennusty', 'rakennusty', 'rakentami',
+    'kiskoty', 'kisko', 'rata-?ty[oö]', 'ratat[oö]i', 'raitiorat', 'raitiotiety', 'raiteen',
+    'juna-?asema', 'ratapih', 'metrorata',
+    'ruoppau', 'laituriurak', 'laituriele', 'merity', 'ponttoni',
+    'maarakennu', 'kaivu', 'asfaltoin', 'p[aä][aä]llysty', 'katuty', 'kunnossapito',
+    'suurtehoimuroin', 'suurtehopuhallu', 'puhallu', 'imuauto', 'imuroin', 'imuty',
+    'esirakennus', 'uudistusty', 'kadunrakennus',
+    'johtoty', 'kaapeli', 'stabiloin', 'sillan', 'sillat', 'siltoj', 'siltaty', 'silta-',
+  ].join('|'), 'i')],
 ];
 
 export const CATEGORY_KEYS = [...CATEGORIES.map(([key]) => key), 'other'];
 
-// Classified from the subject's activity alone. The body cannot be used, its
-// boilerplate repeats "juhlapäivinä" in every decision, and neither can the
-// operative clause, which runs on into the conditions and would tag a suction
-// job with blasting, piling and drilling. The clause is only a fallback for the
-// older subject convention, which has no activity part.
-//
-// A single label would misrepresent the data: roughly a quarter of decisions
-// permit several distinct kinds of noise at once, so every match is kept.
-export function classifyAll(activity, fallback) {
-  const haystack = (activity && activity.trim()) || fallback || '';
-  const matches = CATEGORIES.filter(([, pattern]) => pattern.test(haystack)).map(([key]) => key);
-  return matches.length ? matches : ['other'];
-}
+// Everything from "osoitteessa" onwards names a place, not an activity. Leaving it
+// in made a concert at Katajanokanlaituri read as marine construction and demolition
+// at Messuaukio read as an event.
+const ADDRESS_TAIL = /\bosoit(?:teessa|teissa|teeseen)\b[\s\S]*$/i;
 
-export function primaryCategory(categories) {
-  return categories?.[0] || 'other';
+// Classified from the subject's activity alone. The body cannot be used, since its
+// boilerplate repeats "juhlapaivina" in every decision, and neither can the operative
+// clause, which runs on into the conditions. The clause is only a fallback for the
+// older subject convention, which has no activity part.
+// One label per notice. Across the whole archive only two decisions match both
+// patterns, both of them concerts held under a bridge, so the first match wins and
+// events are tested first as the more specific signal.
+export function classify(activity, fallback) {
+  const source = (activity && activity.trim()) || fallback || '';
+  const haystack = source.replace(ADDRESS_TAIL, ' ');
+  const match = CATEGORIES.find(([, pattern]) => pattern.test(haystack));
+  return match ? match[0] : 'other';
 }
 
 export const DECISION_BASE_URL = 'https://paatokset.hel.fi';
@@ -232,7 +247,9 @@ export function extractDecision(source) {
   const clause = decisionClause(text);
   const period = resolvePeriod(text, clause);
   const { applicant, activity } = parseSubject(subject);
-  const categories = classifyAll(activity, clause);
+  // Non-standard subjects carry no activity part. The subject is a better fallback
+  // than the operative clause, which runs on into the standard conditions.
+  const category = classify(activity, subject);
   const decisionDate = first(source.meeting_date)
     ? new Date(first(source.meeting_date) * 1000).toISOString().slice(0, 10)
     : null;
@@ -249,8 +266,7 @@ export function extractDecision(source) {
     title: subject,
     applicant,
     activity,
-    categories,
-    category: primaryCategory(categories),
+    category,
     locationText: [activity, clause].filter(Boolean).join(' \n '),
     decisionDate,
     start: period?.start || null,

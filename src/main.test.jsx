@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activePresetKey, addDays, categoryCounts, chunkKeysForRange, defaultRange, displayHours,
   describeArea, formatPeriod, formatRange, groupByLocation, isManifestUsable, isoToday, locationKey,
-  matchesFilter, mergeNotices, noticeCategories, noticeLabelAt, noticeOverlapsRange, normaliseRange,
+  matchesFilter, mergeNotices, noticeCategory, noticeLabelAt, noticeOverlapsRange, normaliseRange,
   noticeSpan, rangePresets, readJsonCache, unlocatedNotices, writeJsonCache,
 } from './main.jsx';
 
@@ -26,7 +26,7 @@ const manifest = {
 const notice = (id, overrides = {}) => ({
   id,
   title: `Notice ${id}`,
-  category: 'blasting',
+  category: 'construction',
   decisionDate: '2026-07-01',
   start: '2026-08-01',
   end: '2026-08-31',
@@ -71,7 +71,7 @@ describe('period filtering', () => {
 
   it('counts categories across the whole window', () => {
     const counts = categoryCounts([notice('a'), notice('b'), notice('c', { category: 'event' })]);
-    expect(counts.get('blasting')).toBe(2);
+    expect(counts.get('construction')).toBe(2);
     expect(counts.get('event')).toBe(1);
   });
 });
@@ -160,30 +160,29 @@ describe('grouping by location', () => {
 describe('categories', () => {
   const t = { presetToday: 'Tänään', presetWeek: '7 vrk', presetMonth: '30 vrk', presetYear: 'Tämä vuosi' };
 
-  it('reads the multi-label list, falling back to the primary category', () => {
-    expect(noticeCategories({ categories: ['blasting', 'piling'], category: 'blasting' }))
-      .toEqual(['blasting', 'piling']);
-    // Chunks cached before multi-labelling only carry the single field.
-    expect(noticeCategories({ category: 'rail' })).toEqual(['rail']);
-    expect(noticeCategories({})).toEqual(['other']);
+  it('reads one type per notice and defaults unknown values to other', () => {
+    expect(noticeCategory({ category: 'event' })).toBe('event');
+    expect(noticeCategory({ category: 'blasting' })).toBe('other');
+    expect(noticeCategory({})).toBe('other');
   });
 
-  it('counts a notice under every category it carries', () => {
+  it('counts every type, including the ones with no notices', () => {
     const counts = categoryCounts([
-      notice('a', { categories: ['blasting', 'piling'] }),
-      notice('b', { categories: ['piling'] }),
+      notice('a', { category: 'construction' }),
+      notice('b', { category: 'event' }),
+      notice('c', { category: 'construction' }),
     ]);
-    expect(counts.get('blasting')).toBe(1);
-    expect(counts.get('piling')).toBe(2);
+    expect(counts.get('construction')).toBe(2);
+    expect(counts.get('event')).toBe(1);
+    expect(counts.get('other')).toBe(0);
   });
 
-  it('keeps a notice visible while any of its categories is shown', () => {
-    const mixed = notice('a', { categories: ['blasting', 'event'] });
-    expect(matchesFilter(mixed, new Set(['blasting']))).toBe(true);
-    expect(matchesFilter(mixed, new Set(['blasting', 'event']))).toBe(false);
-    expect(matchesFilter(mixed, new Set())).toBe(true);
+  it('hides a notice only when its own type is switched off', () => {
+    const site = notice('a', { category: 'construction' });
+    expect(matchesFilter(site, new Set())).toBe(true);
+    expect(matchesFilter(site, new Set(['event']))).toBe(true);
+    expect(matchesFilter(site, new Set(['construction']))).toBe(false);
   });
-
 
   it('describes a watch area in plain terms', () => {
     const square = [[60.16, 24.92], [60.16, 24.945], [60.172, 24.945], [60.172, 24.92]];

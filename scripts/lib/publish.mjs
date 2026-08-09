@@ -52,7 +52,6 @@ export function publicRecord(notice) {
     applicant: notice.applicant,
     activity: notice.activity,
     category: notice.category,
-    categories: notice.categories,
     decisionDate: notice.decisionDate,
     start: notice.start,
     end: notice.end,
