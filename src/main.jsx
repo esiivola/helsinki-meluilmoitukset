@@ -295,7 +295,7 @@ const copy = {
     sourceGeo: 'Helsingin kaupungin avoin paikkatieto: osoiteluettelo, nimistö ja aluejako',
     sourceMap: 'Taustakartta: OpenStreetMap ja CARTO',
     updated: 'Aineisto päivitetty',
-    disclaimer: 'Tiedot on poimittu päätösteksteistä automaattisesti. Tarkista aina alkuperäinen päätös.',
+    disclaimer: 'Tiedot on poimittu koneellisesti ja voivat sisältää virheitä.',
     watches: 'Vahdit',
     watchesLabel: 'Vahdit ja uudet ilmoitukset',
     watchCount: 'uutta ilmoitusta',
@@ -380,7 +380,7 @@ const copy = {
     sourceGeo: 'City of Helsinki open geospatial data: address register, place names and district division',
     sourceMap: 'Base map: OpenStreetMap and CARTO',
     updated: 'Data updated',
-    disclaimer: 'Details are extracted from decision texts automatically. Always check the original decision.',
+    disclaimer: 'The data is extracted automatically and may contain errors.',
     watches: 'Watches',
     watchesLabel: 'Watches and new notifications',
     watchCount: 'new notifications',
@@ -547,18 +547,26 @@ function NoticeCard({ notice, t, locale, label, action }) {
 }
 
 // A dialog that closes on Escape and returns focus to whatever opened it.
-function Overlay({ id, title, onClose, t, children, className = '' }) {
+//
+// The effect deliberately has no dependencies. Callers pass an inline arrow for
+// onClose, so listing it would re-run this on every parent render, and moving
+// focus to the heading on each keystroke made a text field unusable. The latest
+// handler is reached through a ref instead.
+export function Overlay({ id, title, onClose, t, children, className = '' }) {
   const node = useRef(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+
   useEffect(() => {
     const opener = document.activeElement;
     node.current?.querySelector('h2')?.focus();
-    const onKey = (event) => { if (event.key === 'Escape') onClose(); };
+    const onKey = (event) => { if (event.key === 'Escape') close.current(); };
     document.addEventListener('keydown', onKey);
     return () => {
       document.removeEventListener('keydown', onKey);
       if (opener instanceof HTMLElement) opener.focus();
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className={`overlay ${className}`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} ref={node}>
@@ -721,8 +729,9 @@ function App() {
   useEffect(() => {
     if (mapRef.current || !mapNode.current) return;
     const map = L.map(mapNode.current, {
-      center: HELSINKI, zoom: DEFAULT_MAP_ZOOM, zoomControl: true, attributionControl: true,
+      center: HELSINKI, zoom: DEFAULT_MAP_ZOOM, zoomControl: false, attributionControl: true,
     });
+    L.control.zoom({ position: 'bottomleft' }).addTo(map);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
       attribution: '&copy; OpenStreetMap, &copy; CARTO',
       maxZoom: 19,
@@ -1217,7 +1226,7 @@ const styles = `
   .map.drawing{cursor:crosshair}
   .leaflet-container{font-family:inherit;background:#dfe3df}
   .leaflet-control-attribution{font-size:11px!important;background:rgba(251,250,247,.82)!important;color:#5b645e!important}
-  .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 18px 76px 0!important}
+  .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 0 18px 18px!important}
   .leaflet-control-zoom a{border:0!important;color:#19201c!important;background:#faf9f5!important}
 
   .topbar{position:absolute;z-index:600;left:50%;top:18px;width:max-content;max-width:calc(100% - 36px);display:flex;flex-direction:column;overflow:hidden;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
@@ -1253,7 +1262,7 @@ const styles = `
   .language:hover{background:#f0efe9}
 
 
-  .panel{position:absolute;z-index:500;left:18px;top:150px;bottom:76px;width:392px;overflow:auto;scrollbar-width:none}
+  .panel{position:absolute;z-index:500;left:18px;top:150px;bottom:88px;width:392px;overflow:auto;scrollbar-width:none}
   .panel::-webkit-scrollbar{display:none}
   .card{position:relative;padding:22px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 16px 46px rgba(24,33,28,.16)}
   .card.message{display:flex;flex-direction:column;gap:12px;color:var(--muted);font-size:14px}
@@ -1283,7 +1292,7 @@ const styles = `
 
   .overlay{position:absolute;z-index:700;padding:20px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 22px 60px rgba(22,31,26,.24);overflow:auto;scrollbar-width:none}
   .overlay::-webkit-scrollbar{display:none}
-  .overlay.side{right:18px;top:150px;bottom:76px;width:392px}
+  .overlay.side{right:18px;top:150px;bottom:88px;width:392px}
   .overlay.centre{left:50%;top:50%;width:min(480px,calc(100% - 36px));max-height:min(76vh,720px);transform:translate(-50%,-50%)}
   .overlay-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
   .overlay-head h2{margin:0;font-size:19px;outline:0}
@@ -1350,12 +1359,12 @@ const styles = `
   @media(max-width:980px){
     .topbar{top:12px;max-width:calc(100% - 24px);gap:8px}
     .brand-text{display:none}
-    .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:76px;width:auto;max-height:52vh}
+    .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:88px;width:auto;max-height:52vh}
     /* On one column the results and a side panel would stack on top of each other. */
     .panel.behind{display:none}
     .info-trigger{right:12px;bottom:12px}
-    .draw-bar{left:12px;right:12px;bottom:70px;width:auto;transform:none}
-    .leaflet-control-zoom{margin:0 12px 76px 0!important}
+    .draw-bar{left:12px;right:12px;bottom:88px;width:auto;transform:none}
+    .leaflet-control-zoom{margin:0 0 12px 12px!important}
   }
 
   .lang-short{display:none}
@@ -1366,7 +1375,6 @@ const styles = `
     .topbar{left:12px;right:12px;width:auto;max-width:none;transform:none}
     .legend-row{flex-direction:column;align-items:stretch;gap:7px}
     .legend{flex-wrap:wrap;overflow:visible}
-    .legend button{flex:1 1 auto;justify-content:space-between}
     .legend-note{font-size:11px;white-space:normal}
     .period-wrap{flex:1 1 auto;width:auto;min-width:0}
     .period-control small{display:none}
