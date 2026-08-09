@@ -29,9 +29,9 @@ loisi eroja, joita aineistossa ei ole.
 
 | Tyyppi | Osuus |
 | --- | --- |
-| Rakentaminen | 1220 |
 | Yleisötilaisuudet | 261 |
-| Muu toiminta | 4 |
+| Rakentaminen | 1220 |
+| Muu toiminta | 3 |
 
 Ilmoitus luokitellaan päätöksen otsikossa kuvatun toiminnan perusteella. Osoiteosa
 jätetään huomiotta, koska paikannimet menevät muuten toiminnan kuvauksen edelle:
@@ -47,8 +47,25 @@ Vahti on alue, jonka rajaat kartalle, ja valinnaisesti joukko melun tyyppejä. K
 tulee uusi meluilmoitus, vahti kertoo siitä seuraavalla käyntikerralla. Ilmoitukset
 säilyvät, kunnes kuittaat ne itse, joko yksitellen, vahdeittain tai kaikki kerralla.
 
+Vahdin nimeä ja seurattavia tyyppejä voi muokata jälkikäteen. Aluetta ei muokata, vaan
+uusi alue tehdään uutena vahtina.
+
 Vahdit tallentuvat selaimen localStorage-muistiin. Palvelu on staattinen sivusto, jolla ei
 ole palvelinta, joka voisi ottaa tietoja vastaan.
+
+### Sijainnin päättely
+
+Sijainti luetaan päätöksen otsikosta neljällä säännöllä, jotka etenevät tarkimmasta
+karkeimpaan: katuosoite numeroineen, kahden kadun risteys, nimetty katu tai paikka, ja
+lopuksi kaupunginosa. Jos mikään ei osu, nimi yritetään vielä tunnistaa osana pidempää
+rekisterinimeä: yhdyssanan alkuosana (Stansvikinkalliolla tunnistetaan Stansvikiksi) tai
+useamman nimen yhteisenä loppuosana (Esplanadi on Pohjois-, Etelä-, Kappeli- ja
+Teatteriesplanadin yhteinen loppu). Jälkimmäinen hyväksytään vain, jos nimet ovat samassa
+paikassa; kaupungin laajuisesti hajallaan oleva loppuosa, kuten "puisto", hylätään.
+
+Suomen taivutus tuotetaan rekisterinimistä eikä arvata: sekä pääte- että
+paikallissijamuodot, ja astevaihtelu (Kamppi on Kampissa, Katajanokka on Katajanokan).
+Näin 1484 päätöksestä 1481 saa sijainnin.
 
 Tiedot on poimittu automaattisesti päätösteksteistä. Ajanjaksot, työajat ja sijainnit
 voivat olla epätarkkoja. Alkuperäinen päätös ratkaisee.

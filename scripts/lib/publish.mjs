@@ -114,11 +114,23 @@ export function serialiseChunk(chunk) {
   return `${JSON.stringify({ schemaVersion: SCHEMA_VERSION, key: chunk.key, notices: chunk.records })}\n`;
 }
 
-export function buildManifest(chunks, generatedAt, totalNotices) {
+// The span the archive actually covers, so the service can say what "1485 notices"
+// refers to rather than leaving a bare number on screen.
+export function coverage(notices) {
+  const spans = notices.map(noticeSpan).filter(Boolean);
+  if (!spans.length) return null;
+  return {
+    from: spans.reduce((min, span) => (span.start < min ? span.start : min), spans[0].start),
+    to: spans.reduce((max, span) => (span.end > max ? span.end : max), spans[0].end),
+  };
+}
+
+export function buildManifest(chunks, generatedAt, totalNotices, notices = []) {
   return {
     schemaVersion: SCHEMA_VERSION,
     generatedAt,
     totalNotices,
+    coverage: coverage(notices),
     currentLookbackDays: CURRENT_LOOKBACK_DAYS,
     chunks: chunks.map((chunk) => ({
       key: chunk.key,

@@ -41,30 +41,63 @@ const MAX_LOCATIONS = 8;
 // Two streets are only a junction if their nearest address points nearly touch.
 const JUNCTION_MAX_DEGREES_SQ = 0.0000025; // roughly 200 m at Helsinki's latitude
 const JUNCTION_CUES = /risteys|risteyksess|kulmass|v[aä]lise|v[aä]lill|kohdalla|liittym/i;
+// Last-resort resolution of a name the registers do not hold verbatim.
+const PARTIAL_MIN_LENGTH = 5;
+const PARTIAL_CLUSTER_SQ = 0.00003; // roughly 600 m at Helsinki's latitude
+const PARTIAL_CLUSTER_SHARE = 0.6;
 
-// Area names take the local cases; -i stems also drop to -e (Munkkiniemi -> Munkkiniemessa).
+// Finnish weakens a doubled stop in the inessive and adessive: Kamppi is in
+// Kampissa, not Kamppissa. The alternations are a closed set, so they can be
+// generated rather than guessed.
+const GRADATION = [['kk', 'k'], ['pp', 'p'], ['tt', 't'], ['nk', 'ng'], ['mp', 'mm'], ['lt', 'll'], ['nt', 'nn'], ['rt', 'rr']];
+
+function weakGrade(stem) {
+  for (const [strong, weak] of GRADATION) {
+    const at = stem.lastIndexOf(strong);
+    if (at >= 0 && at === stem.length - strong.length) return stem.slice(0, at) + weak;
+  }
+  return null;
+}
+
+// Area names take the local cases.
 export function areaForms(base) {
   const b = base.toLowerCase();
   const forms = new Set([b, `${b}ssa`, `${b}ssä`, `${b}lla`, `${b}llä`, `${b}n`]);
+  const addStem = (stem) => {
+    for (const suffix of ['essa', 'essä', 'ella', 'ellä', 'en', 'in', 'issa', 'issä']) forms.add(stem + suffix);
+  };
   if (b.endsWith('i')) {
     const stem = b.slice(0, -1);
-    for (const suffix of ['essa', 'essä', 'ella', 'ellä', 'en', 'in', 'issa', 'issä']) forms.add(stem + suffix);
+    addStem(stem);
+    const weak = weakGrade(stem);
+    if (weak) addStem(weak);
   }
   if (b.endsWith('a') || b.endsWith('ä')) {
     const stem = b.slice(0, -1);
-    for (const suffix of ['an', 'än', 'assa', 'ässä']) forms.add(stem + suffix);
+    const addA = (base) => {
+      for (const suffix of ['an', 'än', 'assa', 'ässä']) forms.add(base + suffix);
+    };
+    addA(stem);
+    // Katajanokka is in Katajanokan, not Katajanokkan.
+    const weak = weakGrade(stem);
+    if (weak) addA(weak);
   }
   return forms;
 }
 
+// A name can be read either as the feature its suffix names or as a plain area,
+// and both readings occur: Punavuori is both "Punavuorella" and "Punavuoressa".
+// Generating the union costs nothing and misses neither.
 function inflect(name) {
-  for (const [suffix, forms] of Object.entries(SUFFIX_FORMS)) {
+  const forms = new Set([name, ...areaForms(name)]);
+  for (const [suffix, suffixForms] of Object.entries(SUFFIX_FORMS)) {
     if (name.endsWith(suffix)) {
       const stem = name.slice(0, -suffix.length);
-      return [name, ...forms.map((form) => stem + form)];
+      for (const form of suffixForms) forms.add(stem + form);
+      break;
     }
   }
-  return [name, ...areaForms(name)];
+  return [...forms];
 }
 
 export function normalize(value) {
@@ -100,6 +133,67 @@ export function buildIndex(gazetteer) {
     for (const form of inflect(name)) if (!districtForms.has(form)) districtForms.set(form, name);
   }
   return { streets, places, districts, streetForms, placeForms, districtForms };
+}
+
+// One representative point for a registered name, whatever register it came from.
+function anchorFor(index, name) {
+  const street = index.streets.get(name);
+  if (street?.length) {
+    const [lat, lon] = centroid(street);
+    return [lat, lon];
+  }
+  return index.places.get(name) || index.districts.get(name) || null;
+}
+
+// The largest group of anchors that all sit within one neighbourhood.
+function largestCluster(anchors) {
+  let best = [];
+  for (const seed of anchors) {
+    const near = anchors.filter((point) => distanceSq(point, seed) <= PARTIAL_CLUSTER_SQ);
+    if (near.length > best.length) best = near;
+  }
+  return best;
+}
+
+/**
+ * Resolves a name the registers do not hold as written, using two general rules.
+ *
+ * A Finnish compound puts the qualifier first, so the longest registered prefix of
+ * an unknown name usually is the place being talked about: Stansvikinkalliolla
+ * reduces to Stansvik.
+ *
+ * Otherwise the name may be the shared tail of several registered names, as
+ * Esplanadi is of Pohjois-, Etela-, Kappeli- and Teatteriesplanadi. That is only
+ * usable when those names agree on where they are, so the anchors must form one
+ * tight cluster carrying most of the matches. A tail like "katu" spreads across the
+ * whole city and is rejected by the same test.
+ */
+export function resolvePartialName(index, word) {
+  for (let length = word.length; length >= PARTIAL_MIN_LENGTH; length -= 1) {
+    const candidate = word.slice(0, length);
+    const exact = index.streetForms.get(candidate)
+      || index.placeForms.get(candidate)
+      || index.districtForms.get(candidate);
+    if (exact) {
+      const anchor = anchorFor(index, exact);
+      if (anchor) return { lat: round(anchor[0]), lon: round(anchor[1]), precision: 'area', label: titleCase(exact) };
+    }
+
+    const tailMatches = [];
+    for (const register of [index.streets, index.places, index.districts]) {
+      for (const name of register.keys()) {
+        if (name.length > candidate.length && name.endsWith(candidate)) tailMatches.push(name);
+      }
+    }
+    if (tailMatches.length < 2) continue;
+    const anchors = tailMatches.map((name) => anchorFor(index, name)).filter(Boolean);
+    const cluster = largestCluster(anchors);
+    if (cluster.length < 2 || cluster.length / anchors.length < PARTIAL_CLUSTER_SHARE) continue;
+    const lat = cluster.reduce((sum, point) => sum + point[0], 0) / cluster.length;
+    const lon = cluster.reduce((sum, point) => sum + point[1], 0) / cluster.length;
+    return { lat: round(lat), lon: round(lon), precision: 'area', label: titleCase(candidate) };
+  }
+  return null;
 }
 
 function centroid(points) {
@@ -257,11 +351,23 @@ export function locateAll(index, text) {
   }
   if (named.length) return withDistrict(dedupe(named));
 
-  if (district) {
-    const [lat, lon] = index.districts.get(district);
-    return [{
-      lat: round(lat), lon: round(lon), precision: 'district', label: titleCase(district), district: titleCase(district),
-    }];
+  // "Punavuoressa, Kampissa ja Toolossa" names three places, so it earns three
+  // markers, exactly as several named streets would.
+  if (districtNames.length) {
+    return dedupe(districtNames.map((name) => {
+      const [lat, lon] = index.districts.get(name);
+      return {
+        lat: round(lat), lon: round(lon), precision: 'district', label: titleCase(name), district: titleCase(name),
+      };
+    }));
+  }
+
+  // Nothing matched verbatim. Try the capitalised words once more, allowing a name
+  // the registers hold only as part of a longer one.
+  for (const match of normalize(text).matchAll(WORD_RE)) {
+    if (match[0].length < PARTIAL_MIN_LENGTH) continue;
+    const partial = resolvePartialName(index, match[0]);
+    if (partial) return withDistrict([partial]);
   }
   return [];
 }

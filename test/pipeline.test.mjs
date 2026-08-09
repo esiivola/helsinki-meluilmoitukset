@@ -4,8 +4,8 @@ import {
   classify, decisionClause, extractDecision, hasNightWork, htmlToText,
   isPublishable, parseHourWindows, parsePeriod, parseSubject,
 } from '../scripts/lib/extract.mjs';
-import { areaForms, buildIndex, locateAll, normalize, titleCase } from '../scripts/lib/geocode.mjs';
-import { buildChunks, buildManifest, contentHash, isCurrent, noticeSpan, serialiseChunk, shiftDays, yearsCovered } from '../scripts/lib/publish.mjs';
+import { areaForms, buildIndex, locateAll, normalize, resolvePartialName, titleCase } from '../scripts/lib/geocode.mjs';
+import { buildChunks, buildManifest, contentHash, coverage, isCurrent, noticeSpan, serialiseChunk, shiftDays, yearsCovered } from '../scripts/lib/publish.mjs';
 
 const read = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
 const fixtures = read('./fixtures/decisions.json');
@@ -95,6 +95,8 @@ describe('text extraction', () => {
   it('excludes withheld decisions and appeal statements', () => {
     expect(isPublishable('Salassa pidettävä (JulkL (621/1999) 24.1 § 7 k)')).toBe(false);
     expect(isPublishable('Lausunto Eteläiset Kaupunginosat Ry:n valituksesta')).toBe(false);
+    // A statement to another authority is filed under the same category.
+    expect(isPublishable('Helsingin kaupungin ympäristölautakunnan lausunto Hämeen ELY-keskukselle')).toBe(false);
     expect(isPublishable('Päätös Kreate Oy:n meluilmoituksesta koskien paalutusta')).toBe(true);
   });
 });
@@ -103,6 +105,44 @@ describe('geocoding', () => {
   it('generates the local cases an area name appears in', () => {
     expect(areaForms('Munkkiniemi')).toContain('munkkiniemessä');
     expect(areaForms('Länsisatama')).toContain('länsisatamassa');
+  });
+
+  it('weakens a doubled stop the way Finnish does', () => {
+    // Kamppi is in Kampissa, not Kamppissa.
+    expect(areaForms('Kamppi')).toContain('kampissa');
+    expect(areaForms('Katajanokka')).toContain('katajanokan');
+  });
+
+  it('reads a name both as its suffix feature and as a plain area', () => {
+    // Punavuori takes -vuorella as a hill and -vuoressa as a district.
+    const [spot] = locateAll(index, 'louhintaa Punavuoressa');
+    expect(spot.label).toBe('Punavuori');
+  });
+
+  it('gives every named district its own marker', () => {
+    const spots = locateAll(index, 'louhintaa ja pontitusta Punavuoressa, Kampissa ja Töölössä');
+    expect(spots.map((spot) => spot.label)).toEqual(expect.arrayContaining(['Punavuori', 'Kamppi']));
+  });
+
+  it('reduces a compound to the registered name it is built on', () => {
+    // Stansvikinkallio is not registered; Stansvik is.
+    const spot = resolvePartialName(index, 'stansvikinkalliolla');
+    expect(spot).toMatchObject({ precision: 'area', label: 'Stansvik' });
+    expect(spot.lat).toBeCloseTo(60.166, 2);
+  });
+
+  it('resolves a shared tail when the names agree on where they are', () => {
+    // Esplanadi is the tail of Pohjois-, Etela-, Kappeli- and Teatteriesplanadi,
+    // which all sit within a couple of hundred metres of each other.
+    const spot = resolvePartialName(index, 'esplanadin');
+    expect(spot).toMatchObject({ precision: 'area' });
+    expect(spot.lat).toBeCloseTo(60.167, 2);
+    expect(spot.lon).toBeCloseTo(24.948, 2);
+  });
+
+  it('refuses a tail that is scattered across the city', () => {
+    // Hundreds of parks share the tail and they are nowhere near each other.
+    expect(resolvePartialName(index, 'puistossa')).toBeNull();
   });
 
   it('resolves a street address to a point', () => {
@@ -262,6 +302,11 @@ describe('chunking for lazy loading', () => {
     const [before] = buildChunks(notices, '2026-08-09');
     const [after] = buildChunks([...notices, { id: 'e', title: 'New', start: '2026-08-12', end: '2026-08-12', decisionDate: '2026-08-11', locations: [] }], '2026-08-09');
     expect(contentHash(serialiseChunk(before))).not.toBe(contentHash(serialiseChunk(after)));
+  });
+
+  it('reports the span the archive covers', () => {
+    expect(coverage(notices)).toEqual({ from: '2019-05-06', to: '2028-05-31' });
+    expect(coverage([])).toBeNull();
   });
 
   it('strips the full decision text from published records', () => {

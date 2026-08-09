@@ -82,8 +82,9 @@ async function readArchive() {
 function toNotice(source, index) {
   const decision = extractDecision(source);
   if (!decision.id || !isPublishable(decision.title)) return null;
-  const locations = locateAll(index, decision.locationText || decision.title);
-  const { text, clause, locationText, ...rest } = decision;
+  const primary = locateAll(index, decision.locationText);
+  const locations = primary.length ? primary : locateAll(index, decision.fallbackLocationText);
+  const { text, clause, locationText, fallbackLocationText, ...rest } = decision;
   return { ...rest, locations };
 }
 
@@ -126,7 +127,7 @@ async function main() {
   }
   await writeFile(
     new URL('index.json', PUBLIC_DIR),
-    `${JSON.stringify(buildManifest(chunks, generatedAt, notices.length), null, 2)}\n`,
+    `${JSON.stringify(buildManifest(chunks, generatedAt, notices.length, notices), null, 2)}\n`,
     'utf8',
   );
 

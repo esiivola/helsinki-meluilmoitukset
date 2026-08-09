@@ -21,7 +21,7 @@ const CHUNK_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 const RANGE_SETTLE_MS = 400;
 const MIN_AREA_POINTS = 3;
 
-const CATEGORY_ORDER = ['construction', 'event', 'other'];
+const CATEGORY_ORDER = ['event', 'construction', 'other'];
 // Slate, ochre and warm grey. The palette is deliberately free of traffic-light
 // meaning: a concert is not "good" and a demolition site is not "bad", they are
 // simply different activities. Blue against ochre also stays separable for the
@@ -31,7 +31,7 @@ const CATEGORY_COLOURS = {
   event: '#9d7b2f',
   other: '#8b918d',
 };
-const IMPRECISE = new Set(['district', 'street']);
+const IMPRECISE = new Set(['district', 'street', 'area']);
 
 /* ------------------------------------------------------------------ storage */
 
@@ -260,6 +260,11 @@ const copy = {
     openDecision: 'Avaa päätös',
     filters: 'Rajaa melun tyypin mukaan',
     customPeriod: 'Oma ajanjakso',
+    approximateLegend: 'Vaalea ympyrä: sijainti on likimääräinen',
+    fromPeriod: 'ajalta',
+    editWatch: 'Muokkaa',
+    saveChanges: 'Tallenna muutokset',
+    typesHint: 'Jos et valitse yhtään tyyppiä, vahti seuraa niitä kaikkia.',
     categories: 'Melun tyyppi',
     construction: 'Rakentaminen',
     event: 'Yleisötilaisuudet',
@@ -340,6 +345,11 @@ const copy = {
     openDecision: 'Open the decision',
     filters: 'Filter by type of noise',
     customPeriod: 'Custom period',
+    approximateLegend: 'Pale circle: the location is approximate',
+    fromPeriod: 'from',
+    editWatch: 'Edit',
+    saveChanges: 'Save the changes',
+    typesHint: 'If you choose no types, the watch follows all of them.',
     categories: 'Type of noise',
     construction: 'Construction',
     event: 'Public events',
@@ -565,6 +575,7 @@ function PeriodControl({ range, setRange, t, locale }) {
     return () => document.removeEventListener('keydown', onKey);
   }, [open]);
 
+  const presets = rangePresets(t, today);
   const summary = formatRange(range, locale);
 
   return (
@@ -585,6 +596,18 @@ function PeriodControl({ range, setRange, t, locale }) {
       </button>
       {open && (
         <div className="period-popover" id="period-popover">
+          <div className="preset-grid">
+            {presets.map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                aria-pressed={activePresetKey(range, presets) === preset.key}
+                onClick={() => { setRange({ from: preset.from, to: preset.to }); setOpen(false); }}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
           <p className="popover-title">{t.customPeriod}</p>
           <div className="date-fields">
             <label>
@@ -648,7 +671,7 @@ function App() {
   const [hidden, setHidden] = useState(() => new Set());
   const [panel, setPanel] = useState(null); // 'filters' | 'watches' | 'info'
   const [guards, setGuards] = useState(() => readGuards(browserStorage()));
-  const [draft, setDraft] = useState(null); // { points, name, categories, closed }
+  const [draft, setDraft] = useState(null); // { points, name, categories, closed, editing }
   const t = copy[locale];
 
   const { manifest, notices, status, reload } = useNoticeData(range);
@@ -815,16 +838,32 @@ function App() {
   };
 
   const saveDraft = () => {
-    const guard = createGuard({
-      id: nextGuardId(guards),
-      name: draft.name,
-      polygon: draft.points,
-      categories: draft.categories,
-      notices: allNotices,
-    });
-    persist([...guards, guard]);
+    if (draft.editing) {
+      persist(guards.map((guard) => (guard.id === draft.editing
+        ? { ...guard, name: draft.name.trim(), categories: draft.categories }
+        : guard)));
+    } else {
+      persist([...guards, createGuard({
+        id: nextGuardId(guards),
+        name: draft.name,
+        polygon: draft.points,
+        categories: draft.categories,
+        notices: allNotices,
+      })]);
+    }
     setDraft(null);
     setPanel('watches');
+  };
+
+  const editGuard = (guard) => {
+    setPanel(null);
+    setDraft({
+      points: guard.polygon,
+      name: guard.name,
+      categories: [...guard.categories],
+      closed: true,
+      editing: guard.id,
+    });
   };
 
   const total = visible.length;
@@ -841,13 +880,6 @@ function App() {
       />
 
       <header className="topbar">
-        <p className="brand">
-          <span className="brand-mark" aria-hidden="true">M</span>
-          <span className="brand-text">
-            <strong>{t.appName}</strong>
-            <small>{t.region}</small>
-          </span>
-        </p>
         <PeriodControl range={range} setRange={setRange} t={t} locale={locale} />
         <div className="top-actions">
           <button
@@ -865,37 +897,14 @@ function App() {
           </button>
           <button
             type="button"
-            className="icon-button"
-            aria-label={t.info}
-            aria-expanded={panel === 'info'}
-            onClick={() => setPanel(panel === 'info' ? null : 'info')}
-          >
-            <Info size={18} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
             className="language"
+            aria-label={locale === 'fi' ? 'FI, vaihda kieleksi englanti' : 'EN, switch the language to Finnish'}
             onClick={() => setLocale(locale === 'fi' ? 'en' : 'fi')}
-            lang={locale === 'fi' ? 'en' : 'fi'}
           >
-            <span className="lang-long">{locale === 'fi' ? 'English' : 'Suomeksi'}</span>
-            <span className="lang-short" aria-hidden="true">{locale === 'fi' ? 'EN' : 'FI'}</span>
+            {locale === 'fi' ? 'FI' : 'EN'}
           </button>
         </div>
       </header>
-
-      <nav className="quick-ranges" aria-label={t.quickRange}>
-        {presets.map((preset) => (
-          <button
-            key={preset.key}
-            type="button"
-            aria-pressed={activePreset === preset.key}
-            onClick={() => setRange({ from: preset.from, to: preset.to })}
-          >
-            {preset.label}
-          </button>
-        ))}
-      </nav>
 
       <main className={`panel${panel ? ' behind' : ''}`} id="results">
         <p className="visually-hidden" aria-live="polite">
@@ -912,32 +921,14 @@ function App() {
           </div>
         )}
 
-        {status === 'ready' && !selected && (
-          <div className="card summary">
-            <h1>
-              {total}
-              {' '}
-              <span>{total === 1 ? t.noticeCountOne : t.noticeCount}</span>
-            </h1>
-            <p className="muted">
-              {total === 0 ? `${t.empty} ${t.emptyHint}` : (
-                <>
-                  <MapPin size={14} aria-hidden="true" />
-                  {' '}
-                  {t.tapHint}
-                </>
-              )}
-            </p>
-            {unlocated.length > 0 && (
-              <details className="unlocated">
-                <summary>{`${unlocated.length} ${t.unlocatedCount}`}</summary>
-                <p className="muted">{t.unlocatedBody}</p>
-                {unlocated.map((notice) => (
-                  <NoticeCard key={notice.id} notice={notice} t={t} locale={locale} />
-                ))}
-              </details>
-            )}
-          </div>
+        {status === 'ready' && !selected && unlocated.length > 0 && (
+          <details className="card unlocated">
+            <summary>{`${unlocated.length} ${t.unlocatedCount}`}</summary>
+            <p className="muted">{t.unlocatedBody}</p>
+            {unlocated.map((notice) => (
+              <NoticeCard key={notice.id} notice={notice} t={t} locale={locale} />
+            ))}
+          </details>
         )}
 
         {status === 'ready' && selected && (
@@ -976,6 +967,7 @@ function App() {
                 );
               })}
             </div>
+            <p className="card-note">{t.disclaimer}</p>
           </div>
         )}
       </main>
@@ -1034,6 +1026,9 @@ function App() {
                       />
                     ))}
                     <div className="watch-actions">
+                      <button type="button" className="ghost small" onClick={() => editGuard(guard)}>
+                        <Pencil size={13} aria-hidden="true" /> {t.editWatch}
+                      </button>
                       {pending.length > 0 && (
                         <button
                           type="button"
@@ -1077,7 +1072,9 @@ function App() {
           </ul>
           {manifest && (
             <p className="muted">
-              {`${t.updated} ${formatDate(manifest.generatedAt.slice(0, 10), locale)} · ${manifest.totalNotices}`}
+              {`${manifest.totalNotices} ${t.noticeCount}`}
+              {manifest.coverage && ` ${t.fromPeriod} ${formatRange(manifest.coverage, locale)}`}
+              {`. ${t.updated} ${formatDate(manifest.generatedAt.slice(0, 10), locale)}.`}
             </p>
           )}
         </Overlay>
@@ -1113,7 +1110,13 @@ function App() {
       )}
 
       {draft?.closed && (
-        <Overlay id="new-watch" title={t.addWatch} onClose={() => setDraft(null)} t={t} className="centre">
+        <Overlay
+          id="new-watch"
+          title={draft.editing ? t.editWatch : t.addWatch}
+          onClose={() => setDraft(null)}
+          t={t}
+          className="centre"
+        >
           <p className="muted">{`${t.watchArea}: ${describeArea(draft.points, t)}`}</p>
           <label className="field" htmlFor="watch-name">
             <span>{t.nameWatch}</span>
@@ -1127,7 +1130,8 @@ function App() {
             />
           </label>
           <fieldset>
-            <legend>{`${t.typesWatched} (${t.allTypes.toLowerCase()})`}</legend>
+            <legend>{t.typesWatched}</legend>
+            <p className="field-hint">{t.typesHint}</p>
             <CategoryPicker
               idPrefix="watch"
               selected={(category) => draft.categories.includes(category)}
@@ -1140,7 +1144,9 @@ function App() {
               t={t}
             />
           </fieldset>
-          <button type="button" className="primary" onClick={saveDraft}>{t.saveWatch}</button>
+          <button type="button" className="primary" onClick={saveDraft}>
+            {draft.editing ? t.saveChanges : t.saveWatch}
+          </button>
         </Overlay>
       )}
 
@@ -1159,10 +1165,21 @@ function App() {
             </button>
           ))}
         </div>
-        <p className="disclaimer">
-          <AlertTriangle size={15} aria-hidden="true" />
-          {t.disclaimer}
-        </p>
+        <div className="bottom-end">
+          <p className="legend-note">
+            <span className="chip-dot hollow" aria-hidden="true" />
+            {t.approximateLegend}
+          </p>
+          <button
+            type="button"
+            className="info-trigger"
+            aria-label={t.info}
+            aria-expanded={panel === 'info'}
+            onClick={() => setPanel(panel === 'info' ? null : 'info')}
+          >
+            <Info size={18} aria-hidden="true" />
+          </button>
+        </div>
       </footer>
     </div>
   );
@@ -1193,13 +1210,8 @@ const styles = `
   .leaflet-control-zoom a{border:0!important;color:#19201c!important;background:#faf9f5!important}
 
   .topbar{position:absolute;z-index:600;left:50%;top:18px;width:min(880px,calc(100% - 36px));display:flex;align-items:center;gap:12px;padding:9px 10px;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
-  .brand{display:flex;align-items:center;gap:10px;margin:0;flex:0 0 auto}
-  .brand-mark{display:grid;place-items:center;flex:0 0 auto;width:38px;height:38px;border-radius:11px;background:#1d2923;color:#fbfaf7;font-size:19px;font-weight:700}
-  .brand-text{display:flex;flex-direction:column}
-  .brand strong{font-size:14px;line-height:1;letter-spacing:.1em}
-  .brand small{margin-top:4px;color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
 
-  .period-wrap{position:relative;flex:1;min-width:0}
+  .period-wrap{position:relative;flex:1;min-width:0;max-width:320px}
   .period-control{width:100%;height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;border:0;border-radius:12px;background:#f0efe9;color:var(--ink);text-align:left;cursor:pointer}
   .period-control>svg:first-child{flex:0 0 auto;color:var(--blue)}
   .period-control>svg:last-child{margin-left:auto;color:var(--muted);transition:transform .18s}
@@ -1208,7 +1220,11 @@ const styles = `
   .period-control small{color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
   .period-control strong{margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:650}
   .period-popover{position:absolute;z-index:720;top:52px;left:0;width:min(360px,calc(100vw - 24px));padding:16px;border:1px solid rgba(255,255,255,.9);border-radius:16px;background:var(--paper);box-shadow:0 18px 54px rgba(22,31,26,.2)}
-  .popover-title{margin:0 0 10px;color:var(--muted);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+  .preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .preset-grid button{height:44px;border:1px solid var(--line);border-radius:11px;background:var(--paper);color:var(--ink);font-size:13px;cursor:pointer}
+  .preset-grid button:hover{background:#f0efe9}
+  .preset-grid button[aria-pressed=true]{border-color:#1d2923;background:#1d2923;color:var(--paper)}
+  .popover-title{margin:16px 0 10px;color:var(--muted);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
   .date-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .date-fields label,.field{display:flex;flex-direction:column;gap:6px}
   .date-fields span,.field>span{color:var(--muted);font-size:12px}
@@ -1222,13 +1238,8 @@ const styles = `
   .language{height:38px;padding:0 12px;border:1px solid var(--line);border-radius:11px;background:transparent;color:var(--ink);font-size:13px;cursor:pointer;white-space:nowrap}
   .language:hover{background:#f0efe9}
 
-  .quick-ranges{position:absolute;z-index:590;left:50%;top:88px;display:flex;gap:7px;max-width:calc(100% - 36px);padding:6px;border:1px solid rgba(255,255,255,.75);border-radius:14px;background:rgba(251,250,247,.94);box-shadow:0 6px 22px rgba(28,38,32,.11);backdrop-filter:blur(16px);transform:translateX(-50%);overflow-x:auto;scrollbar-width:none}
-  .quick-ranges::-webkit-scrollbar{display:none}
-  .quick-ranges button{flex:0 0 auto;height:34px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--ink);font-size:13px;white-space:nowrap;cursor:pointer}
-  .quick-ranges button:hover{background:#f0efe9}
-  .quick-ranges button[aria-pressed=true]{background:#1d2923;color:var(--paper)}
 
-  .panel{position:absolute;z-index:500;left:18px;top:140px;bottom:104px;width:392px;overflow:auto;scrollbar-width:none}
+  .panel{position:absolute;z-index:500;left:18px;top:88px;bottom:104px;width:392px;overflow:auto;scrollbar-width:none}
   .panel::-webkit-scrollbar{display:none}
   .card{position:relative;padding:22px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 16px 46px rgba(24,33,28,.16)}
   .card.message{display:flex;flex-direction:column;gap:12px;color:var(--muted);font-size:14px}
@@ -1258,7 +1269,7 @@ const styles = `
 
   .overlay{position:absolute;z-index:700;padding:20px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 22px 60px rgba(22,31,26,.24);overflow:auto;scrollbar-width:none}
   .overlay::-webkit-scrollbar{display:none}
-  .overlay.side{right:18px;top:140px;bottom:104px;width:392px}
+  .overlay.side{right:18px;top:88px;bottom:104px;width:392px}
   .overlay.centre{left:50%;top:50%;width:min(480px,calc(100% - 36px));max-height:min(76vh,720px);transform:translate(-50%,-50%)}
   .overlay-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
   .overlay-head h2{margin:0;font-size:19px;outline:0}
@@ -1307,8 +1318,15 @@ const styles = `
   .legend button[aria-pressed=false]{opacity:.42}
   .legend button[aria-pressed=false] .chip-dot{background:#b7bcb8!important}
   .legend b{color:var(--muted);font-weight:650}
-  .disclaimer{display:flex;align-items:center;gap:9px;margin:0;color:var(--muted);font-size:12px;line-height:1.5;text-align:right}
-  .disclaimer>svg{flex:0 0 auto;color:#a97c2f}
+  .legend-note{display:flex;align-items:center;gap:8px;margin:0;color:var(--muted);font-size:12px;white-space:nowrap}
+  .chip-dot.hollow{background:var(--paper);box-shadow:inset 0 0 0 2px var(--muted)}
+  .card-note{margin:14px 0 0;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;line-height:1.5}
+  .field-hint{margin:4px 0 8px;color:var(--muted);font-size:12px}
+  .bottom-end{display:flex;align-items:center;gap:12px;flex:0 0 auto}
+  .info-trigger{width:36px;height:36px;flex:0 0 auto;display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;background:transparent;color:var(--ink);cursor:pointer}
+  .info-trigger:hover{background:#f0efe9;color:var(--blue)}
+  .unlocated.card{padding:14px 18px}
+  .unlocated summary{font-size:13px;cursor:pointer}
 
   .melu-marker{display:grid;place-items:center;width:26px;height:26px;border:2.5px solid var(--paper);border-radius:50%;background:var(--dot);color:#fff;font-size:12px;font-weight:700;box-shadow:0 4px 12px rgba(18,26,22,.3)}
   /* Approximate points read as hollow, so a district centroid is never mistaken
@@ -1320,13 +1338,15 @@ const styles = `
   @media(max-width:980px){
     .topbar{left:12px;right:12px;top:12px;width:auto;transform:none}
     .brand-text{display:none}
-    .quick-ranges{left:12px;right:12px;max-width:none;top:78px;justify-content:flex-start;transform:none}
-    .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:132px;width:auto;max-height:52vh}
+    .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:140px;width:auto;max-height:52vh}
     /* On one column the results and a side panel would stack on top of each other. */
     .panel.behind{display:none}
-    .bottom-bar{left:12px;right:12px;bottom:12px;flex-direction:column;align-items:stretch;gap:9px;padding:9px 10px}
-    .legend{justify-content:flex-start}
-    .disclaimer{text-align:left;font-size:11px}
+    .bottom-bar{left:12px;right:12px;bottom:12px;flex-direction:column;align-items:stretch;gap:8px;padding:9px 10px}
+    /* Wrapping reads as finished; a chip sliced by the edge does not. */
+    .legend{flex-wrap:wrap;overflow:visible}
+    .legend button{flex:1 1 auto;justify-content:space-between}
+    .legend-note{font-size:11px;white-space:normal}
+    .bottom-end{justify-content:space-between}
     .draw-bar{left:12px;right:12px;bottom:124px;width:auto;transform:none}
     .leaflet-control-zoom{margin:0 12px 190px 0!important}
   }

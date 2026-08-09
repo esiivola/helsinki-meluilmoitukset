@@ -231,7 +231,9 @@ export const DECISION_BASE_URL = 'https://paatokset.hel.fi';
 export function isPublishable(subject) {
   if (!subject) return false;
   if (/^Salassa pidett[aä]v[aä]/i.test(subject)) return false;
-  if (/^(Lausunto|Oikaisuvaatimus|Vastine|Selvitys)\b/i.test(subject)) return false;
+  // A statement given to another authority is filed under the same category but is
+  // not a Helsinki noise permit, wherever the word appears in the subject.
+  if (/\b(lausunto|lausunnon|oikaisuvaatimus|vastine|selvitys)\b/i.test(subject)) return false;
   return true;
 }
 
@@ -268,6 +270,11 @@ export function extractDecision(source) {
     activity,
     category,
     locationText: [activity, clause].filter(Boolean).join(' \n '),
+    // Second chance for the older subject conventions, which put the address in
+    // the subject rather than in an activity part. The applicant is removed first:
+    // company names carry place names of their own ("Drumso Idrottskamrater"),
+    // which would otherwise pin an event to the wrong side of town.
+    fallbackLocationText: applicant ? subject.split(applicant).join(' ') : subject,
     decisionDate,
     start: period?.start || null,
     end: period?.end || null,

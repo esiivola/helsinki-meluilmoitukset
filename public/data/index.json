@@ -1,7 +1,11 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-09T16:41:39.578Z",
-  "totalNotices": 1485,
+  "generatedAt": "2026-08-09T18:18:43.181Z",
+  "totalNotices": 1484,
+  "coverage": {
+    "from": "2015-05-19",
+    "to": "2029-12-31"
+  },
   "currentLookbackDays": 30,
   "chunks": [
     {
@@ -10,7 +14,7 @@
       "from": "2026-07-10",
       "to": null,
       "count": 103,
-      "hash": "1mc7501"
+      "hash": "fdsw9k"
     },
     {
       "key": "2029",
@@ -18,7 +22,7 @@
       "from": "2029-01-01",
       "to": "2029-12-31",
       "count": 3,
-      "hash": "1kmcj0r"
+      "hash": "1u3nqsk"
     },
     {
       "key": "2028",
@@ -26,7 +30,7 @@
       "from": "2028-01-01",
       "to": "2028-12-31",
       "count": 9,
-      "hash": "yoy35q"
+      "hash": "1s5rajc"
     },
     {
       "key": "2027",
@@ -34,7 +38,7 @@
       "from": "2027-01-01",
       "to": "2027-12-31",
       "count": 32,
-      "hash": "oxewq"
+      "hash": "1f1q3kw"
     },
     {
       "key": "2026",
@@ -42,7 +46,7 @@
       "from": "2026-01-01",
       "to": "2026-12-31",
       "count": 176,
-      "hash": "i2bz93"
+      "hash": "uyzq2a"
     },
     {
       "key": "2025",
@@ -50,7 +54,7 @@
       "from": "2025-01-01",
       "to": "2025-12-31",
       "count": 180,
-      "hash": "7ujnc0"
+      "hash": "2qjg8u"
     },
     {
       "key": "2024",
@@ -58,7 +62,7 @@
       "from": "2024-01-01",
       "to": "2024-12-31",
       "count": 173,
-      "hash": "t20k2t"
+      "hash": "bg9p0y"
     },
     {
       "key": "2023",
@@ -66,7 +70,7 @@
       "from": "2023-01-01",
       "to": "2023-12-31",
       "count": 178,
-      "hash": "pw2d4q"
+      "hash": "1xe6mcp"
     },
     {
       "key": "2022",
@@ -74,7 +78,7 @@
       "from": "2022-01-01",
       "to": "2022-12-31",
       "count": 226,
-      "hash": "1j0czd9"
+      "hash": "1ohvpzm"
     },
     {
       "key": "2021",
@@ -82,7 +86,7 @@
       "from": "2021-01-01",
       "to": "2021-12-31",
       "count": 218,
-      "hash": "1rkvcau"
+      "hash": "1du38w1"
     },
     {
       "key": "2020",
@@ -98,7 +102,7 @@
       "from": "2019-01-01",
       "to": "2019-12-31",
       "count": 208,
-      "hash": "z1zisy"
+      "hash": "ryn5q8"
     },
     {
       "key": "2018",
@@ -106,15 +110,15 @@
       "from": "2018-01-01",
       "to": "2018-12-31",
       "count": 169,
-      "hash": "1xcyyw0"
+      "hash": "iraq4g"
     },
     {
       "key": "2017",
       "file": "notices-2017.json",
       "from": "2017-01-01",
       "to": "2017-12-31",
-      "count": 156,
-      "hash": "1kkgjvh"
+      "count": 155,
+      "hash": "s8bksa"
     },
     {
       "key": "2016",
@@ -122,7 +126,7 @@
       "from": "2016-01-01",
       "to": "2016-12-31",
       "count": 3,
-      "hash": "16x76o9"
+      "hash": "uxyu7g"
     },
     {
       "key": "2015",
