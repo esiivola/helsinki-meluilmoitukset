@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activePresetKey, addDays, categoryCounts, chunkKeysForRange, defaultRange, displayHours,
-  formatPeriod, groupByLocation, isManifestUsable, isoToday, legendCategories, locationKey,
+  describeArea, formatPeriod, formatRange, groupByLocation, isManifestUsable, isoToday, locationKey,
   matchesFilter, mergeNotices, noticeCategories, noticeLabelAt, noticeOverlapsRange, normaliseRange,
   noticeSpan, rangePresets, readJsonCache, unlocatedNotices, writeJsonCache,
 } from './main.jsx';
@@ -184,19 +184,10 @@ describe('categories', () => {
     expect(matchesFilter(mixed, new Set())).toBe(true);
   });
 
-  it('lists only the categories actually on the map, capped with an overflow count', () => {
-    const many = [
-      notice('a', { categories: ['blasting', 'crushing', 'piling'] }),
-      notice('b', { categories: ['drilling', 'demolition', 'rail'] }),
-      notice('c', { categories: ['marine', 'event'] }),
-    ];
-    const legend = legendCategories(many, new Set(), 6);
-    expect(legend.shown).toEqual(['blasting', 'crushing', 'piling', 'drilling', 'demolition', 'rail']);
-    expect(legend.overflow).toBe(2);
 
-    const filtered = legendCategories(many, new Set(['blasting', 'crushing', 'piling', 'drilling']), 6);
-    expect(filtered.shown).toEqual(['demolition', 'rail', 'marine', 'event']);
-    expect(filtered.overflow).toBe(0);
+  it('describes a watch area in plain terms', () => {
+    const square = [[60.16, 24.92], [60.16, 24.945], [60.172, 24.945], [60.172, 24.92]];
+    expect(describeArea(square, { corners: 'kulmaa' })).toMatch(/km², 4 kulmaa$/);
   });
 
   it('marks the quick range that matches the current selection', () => {
@@ -230,7 +221,13 @@ describe('custom range entry', () => {
 describe('presentation', () => {
   it('collapses a single-day period to one date', () => {
     expect(formatPeriod(notice('a', { start: '2026-08-25', end: '2026-08-25' }), 'fi')).toBe('25.8.2026');
-    expect(formatPeriod(notice('b', { start: '2026-08-10', end: '2026-09-30' }), 'fi')).toBe('10.8.2026 – 30.9.2026');
+    expect(formatPeriod(notice('b', { start: '2026-08-10', end: '2026-09-30' }), 'fi')).toBe('10.8.2026–30.9.2026');
+  });
+
+  it('drops the repeated year from a range within one year', () => {
+    expect(formatRange({ from: '2026-08-09', to: '2026-08-15' }, 'fi')).toBe('9.8.\u201315.8.2026');
+    expect(formatRange({ from: '2026-12-20', to: '2027-01-10' }, 'fi')).toBe('20.12.2026\u201310.1.2027');
+    expect(formatRange({ from: '2026-08-09', to: '2026-08-09' }, 'fi')).toBe('9.8.2026');
   });
 
   it('shows permitted working hours in preference to the boilerplate night ban', () => {

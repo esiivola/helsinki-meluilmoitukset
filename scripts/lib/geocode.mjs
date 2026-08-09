@@ -70,7 +70,7 @@ function inflect(name) {
 export function normalize(value) {
   return (value || '')
     .toLowerCase()
-    .replace(/[‐-―−]/g, '-')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
     .replace(/[\s ]+/g, ' ')
     .trim();
 }
@@ -157,7 +157,7 @@ function resolveNumber(points, number, letter) {
   return null;
 }
 
-// "Lastenkodinkatu 11 ja Mechelininkatu 24" — the second address carries no
+// "Lastenkodinkatu 11 ja Mechelininkatu 24", the second address carries no
 // "osoitteessa" cue, so any gazetteer street followed by a number counts.
 function findAddresses(index, text) {
   const found = [];
@@ -214,7 +214,7 @@ function dedupe(locations) {
 
 /**
  * Resolve every site a decision names.
- * `text` should be the subject's activity part plus the operative clause — never
+ * `text` should be the subject's activity part plus the operative clause, never
  * the applicant's name, which frequently contains a place name of its own
  * ("Drumsö Idrottskamrater", "Helsingin Talosiirto Oy").
  */

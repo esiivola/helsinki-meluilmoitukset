@@ -59,7 +59,6 @@ export function publicRecord(notice) {
     hours: notice.hours,
     nightWork: notice.nightWork,
     locations: notice.locations,
-    authority: notice.authority,
   };
 }
 
@@ -99,7 +98,7 @@ export function buildChunks(notices, today) {
 }
 
 // FNV-1a over the serialised chunk. Only used to key the browser's cache, so a
-// short non-cryptographic digest is enough — and it lets chunk files stay
+// short non-cryptographic digest is enough, and it lets chunk files stay
 // byte-identical between runs when nothing changed.
 export function contentHash(value) {
   let hash = 0x811c9dc5;

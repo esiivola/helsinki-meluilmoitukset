@@ -2,11 +2,13 @@
 // Input is a document from the Ahjo decision index; output is a structured record
 // without a location, which geocode.mjs resolves separately.
 
-const DASH = '[-‐‑‒–—−]';
+// Decisions punctuate ranges with any of the Unicode dashes, including U+2014,
+// which is written as an escape so that no literal em dash appears in this file.
+const DASH = '[-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2212]';
 const SPACE = '[\\s\\u00a0]';
 
 const NAMED_ENTITIES = {
-  nbsp: ' ', amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', shy: '', ndash: '–', mdash: '—',
+  nbsp: ' ', amp: '&', quot: '"', apos: "'", lt: '<', gt: '>', shy: '', ndash: '\u2013', mdash: '\u2014',
   auml: 'ä', Auml: 'Ä', ouml: 'ö', Ouml: 'Ö', aring: 'å', Aring: 'Å', eacute: 'é', uuml: 'ü',
 };
 
@@ -188,8 +190,8 @@ export const CATEGORIES = [
 
 export const CATEGORY_KEYS = [...CATEGORIES.map(([key]) => key), 'other'];
 
-// Classified from the subject's activity alone. The body cannot be used — its
-// boilerplate repeats "juhlapäivinä" in every decision — and neither can the
+// Classified from the subject's activity alone. The body cannot be used, its
+// boilerplate repeats "juhlapäivinä" in every decision, and neither can the
 // operative clause, which runs on into the conditions and would tag a suction
 // job with blasting, piling and drilling. The clause is only a fallback for the
 // older subject convention, which has no activity part.

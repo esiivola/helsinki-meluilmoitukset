@@ -3,56 +3,110 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#dfe3df" />
-    <meta name="description" content="Helsingin meluilmoituskartta näyttää louhinta-, rakennus- ja tapahtumamelun ilmoitukset kartalla valitulle ajanjaksolle." />
+    <meta name="description" content="Helsingin meluilmoituskartta näyttää kartalla, missä tehdään louhintaa, paalutusta, purkutyötä tai rata- ja katutöitä ja missä järjestetään ulkoilmakonsertteja. Valitse ajanjakso ja melun tyyppi." />
+    <meta name="author" content="Eero Siivola" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <link rel="canonical" href="https://esiivola.github.io/helsinki-meluilmoitukset/" />
     <meta property="og:type" content="website" />
     <meta property="og:locale" content="fi_FI" />
+    <meta property="og:locale:alternate" content="en_GB" />
     <meta property="og:site_name" content="Helsingin meluilmoituskartta" />
     <meta property="og:title" content="Helsingin meluilmoituskartta" />
-    <meta property="og:description" content="Katso kartalta, missä Helsingissä tehdään meluavaa työtä tai järjestetään meluavia tapahtumia valitsemanasi ajanjaksona." />
+    <meta property="og:description" content="Katso kartalta, missä Helsingissä tehdään erityisen häiritsevää melua aiheuttavaa työtä ja milloin. Perustuu kaupungin meluilmoituspäätöksiin." />
     <meta property="og:url" content="https://esiivola.github.io/helsinki-meluilmoitukset/" />
     <meta name="twitter:card" content="summary" />
     <meta name="twitter:title" content="Helsingin meluilmoituskartta" />
-    <meta name="twitter:description" content="Louhinta-, rakennus- ja tapahtumamelun ilmoitukset Helsingissä yhdellä kartalla." />
+    <meta name="twitter:description" content="Louhinta, paalutus, purkutyöt, rata- ja katutyöt sekä ulkoilmakonsertit Helsingissä yhdellä kartalla." />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%231d2923'/%3E%3Ctext x='32' y='45' text-anchor='middle' font-family='Arial' font-size='38' font-weight='700' fill='white'%3EM%3C/text%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://a.basemaps.cartocdn.com" crossorigin />
-    <title>Helsingin meluilmoituskartta – louhinta, rakennustyöt ja tapahtumat</title>
+    <title>Helsingin meluilmoituskartta: louhinta, rakennustyöt ja ulkoilmakonsertit</title>
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
-        "@type": "WebApplication",
-        "name": "Helsingin meluilmoituskartta",
-        "alternateName": "Helsinki Noise Notice Map",
-        "url": "https://esiivola.github.io/helsinki-meluilmoitukset/",
-        "description": "Karttapalvelu Helsingin meluilmoituspäätösten selaamiseen ajanjakson mukaan.",
-        "applicationCategory": "NavigationApplication",
-        "operatingSystem": "Any",
-        "browserRequirements": "Requires JavaScript",
-        "inLanguage": ["fi", "en"],
-        "isAccessibleForFree": true,
-        "areaServed": {
-          "@type": "City",
-          "name": "Helsinki"
-        },
-        "author": {
-          "@type": "Person",
-          "url": "https://esiivola.github.io/"
-        }
+        "@graph": [
+          {
+            "@type": "WebApplication",
+            "name": "Helsingin meluilmoituskartta",
+            "alternateName": "Helsinki Noise Notification Map",
+            "url": "https://esiivola.github.io/helsinki-meluilmoitukset/",
+            "description": "Karttapalvelu Helsingin meluilmoituspäätösten selaamiseen ajanjakson ja melun tyypin mukaan.",
+            "applicationCategory": "NavigationApplication",
+            "operatingSystem": "Any",
+            "browserRequirements": "Requires JavaScript",
+            "inLanguage": ["fi", "en"],
+            "isAccessibleForFree": true,
+            "featureList": [
+              "Meluilmoitukset kartalla valitulta ajanjaksolta",
+              "Rajaus melun tyypin mukaan",
+              "Aluevahdit, jotka ilmoittavat uusista meluilmoituksista",
+              "Suora linkki alkuperäiseen päätökseen"
+            ],
+            "areaServed": { "@type": "City", "name": "Helsinki" },
+            "author": { "@type": "Person", "name": "Eero Siivola", "url": "https://esiivola.github.io/" }
+          },
+          {
+            "@type": "FAQPage",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Mikä on meluilmoitus?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Meluilmoitus on ympäristönsuojelulain 118 §:n mukainen ilmoitus tilapäisestä toiminnasta, joka aiheuttaa erityisen häiritsevää melua tai tärinää. Helsingissä ilmoituksen käsittelee kaupunkiympäristön toimialan ympäristönsuojelu, joka antaa päätöksessä toimintaa koskevat määräykset."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Mistä toiminnasta meluilmoitus tehdään?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Ilmoitus tehdään esimerkiksi louhinnasta, kivenmurskauksesta, paalutuksesta, purkutyöstä sekä ulkoilmakonserteista ja muista yleisötilaisuuksista. Ilmoitus on tehtävä viimeistään 30 vuorokautta ennen toiminnan aloittamista."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Tallentaako palvelu tietoja minusta?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Ei. Palvelu on staattinen sivusto ilman palvelinta. Vahdit, niiden alueet ja kuittaukset tallentuvat vain oman selaimesi muistiin."
+                }
+              }
+            ]
+          }
+        ]
       }
     </script>
     <style>
-      html,body,#root{width:100%;height:100%;margin:0}.static-shell{min-height:100%;display:grid;place-content:center;padding:24px;box-sizing:border-box;background:#dfe3df;color:#19201c;font:16px/1.5 Arial,sans-serif;text-align:center}.static-shell h1{margin:0;font-size:28px}.static-shell p{max-width:620px;margin:12px auto 0}.static-shell a{color:#2457d6}
+      html,body,#root{width:100%;height:100%;margin:0}
+      .static-shell{min-height:100%;display:grid;place-content:center;padding:32px 24px;box-sizing:border-box;background:#dfe3df;color:#19201c;font:16px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+      .static-shell>div{max-width:640px;margin:0 auto}
+      .static-shell h1{margin:0 0 12px;font-size:30px;line-height:1.2;letter-spacing:-.02em}
+      .static-shell h2{margin:24px 0 8px;font-size:18px}
+      .static-shell p,.static-shell li{margin:8px 0}
+      .static-shell a{color:#1f4fc4}
     </style>
   </head>
   <body>
     <div id="root">
       <main class="static-shell">
-        <h1>Helsingin meluilmoituskartta</h1>
-        <p>Katso kartalta, missä Helsingissä tehdään meluavaa louhintaa, rakennustyötä tai rata- ja kiskotyötä ja missä järjestetään meluavia ulkoilmatapahtumia valitsemanasi ajanjaksona.</p>
-        <p>Tiedot on poimittu automaattisesti Helsingin kaupungin meluilmoituspäätöksistä. Tarkista aina alkuperäinen päätös.</p>
-        <p><a href="https://paatokset.hel.fi/fi/asia?s=meluilmoitus">Helsingin kaupungin meluilmoituspäätökset</a></p>
+        <div>
+          <h1>Helsingin meluilmoituskartta</h1>
+          <p>Karttapalvelu näyttää, missä Helsingissä tehdään erityisen häiritsevää melua aiheuttavaa työtä ja milloin. Valitse ajanjakso, oletuksena seuraavat seitsemän vuorokautta, ja rajaa näkymä melun tyypin mukaan.</p>
+          <h2>Mikä on meluilmoitus?</h2>
+          <p>Meluilmoitus on ympäristönsuojelulain 118 §:n mukainen ilmoitus tilapäisestä toiminnasta, joka aiheuttaa erityisen häiritsevää melua tai tärinää. Helsingissä ilmoituksen käsittelee kaupunkiympäristön toimialan ympäristönsuojelu, joka antaa päätöksessä toimintaa koskevat määräykset.</p>
+          <h2>Mitä kartalla näkyy?</h2>
+          <ul>
+            <li>Louhinta ja räjäytys, murskaus ja iskuvasarointi</li>
+            <li>Paalutus ja pontitus, poraus, purku ja saneeraus</li>
+            <li>Rata- ja kiskotyöt, vesirakentaminen, maa- ja katutyöt</li>
+            <li>Ulkoilmakonsertit ja yleisötilaisuudet</li>
+          </ul>
+          <p>Voit myös luoda vahdin: rajaa kartalta alue ja valitse melun tyypit, niin palvelu kertoo, kun alueelle tulee uusi meluilmoitus. Vahdit tallentuvat vain omaan selaimeesi.</p>
+          <p>Tiedot on poimittu automaattisesti kaupungin päätösteksteistä. Tarkista aina alkuperäinen päätös.</p>
+          <p><a href="https://paatokset.hel.fi/fi/asia?s=meluilmoitus">Helsingin kaupungin meluilmoituspäätökset</a></p>
+        </div>
       </main>
     </div>
     <script type="module" src="/src/main.jsx"></script>

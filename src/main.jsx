@@ -3,9 +3,13 @@ import { createRoot } from 'react-dom/client';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import {
-  AlertTriangle, CalendarClock, ChevronDown, ExternalLink, Info, Layers3,
-  LocateFixed, MapPin, Moon, RefreshCw, X,
+  AlertTriangle, Bell, CalendarClock, Check, ChevronDown, ExternalLink, Info,
+  LocateFixed, MapPin, Moon, Pencil, RefreshCw, SlidersHorizontal, Trash2, X,
 } from 'lucide-react';
+import {
+  boundsToPolygon, clearAllGuards, clearGuard, createGuard, acknowledgeNotices, nextGuardId,
+  pendingByGuard, polygonAreaKm2, readGuards, totalPending, writeGuards,
+} from './guards.js';
 
 const HELSINKI = [60.16986, 24.93838];
 export const DEFAULT_MAP_ZOOM = 12;
@@ -15,14 +19,14 @@ const CACHE_PREFIX = 'helsinki-melu:v1:';
 const MANIFEST_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 const CHUNK_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
 const RANGE_SETTLE_MS = 400;
-// Same order as the collector's priority list, so the first category on a notice
-// is the one that colours its marker.
+const MIN_AREA_POINTS = 3;
+
+// Ordered as the collector orders them, so the first type on a notice is the one
+// that colours its marker.
 const CATEGORY_ORDER = [
   'blasting', 'crushing', 'piling', 'drilling', 'demolition',
   'rail', 'marine', 'earthworks', 'event', 'other',
 ];
-// Heavy impulsive work sits in the warm end, infrastructure in blue, events in
-// green, so the map still reads at a glance despite ten categories.
 const CATEGORY_COLOURS = {
   blasting: '#a32b1f',
   crushing: '#c85c2b',
@@ -35,7 +39,6 @@ const CATEGORY_COLOURS = {
   event: '#17735a',
   other: '#68716b',
 };
-const LEGEND_LIMIT = 6;
 const IMPRECISE = new Set(['district', 'street']);
 
 /* ------------------------------------------------------------------ storage */
@@ -78,7 +81,7 @@ export function defaultRange(today = isoToday()) {
   return { from: today, to: addDays(today, DEFAULT_RANGE_DAYS - 1) };
 }
 
-// A notice without a period still has a decision date, so it can be placed in time.
+// A notice without a stated period still has a decision date, so it can be placed in time.
 export function noticeSpan(notice) {
   const start = notice.start || notice.decisionDate;
   const end = notice.end || notice.start || notice.decisionDate;
@@ -116,6 +119,23 @@ export function mergeNotices(existing, incoming) {
   return merged;
 }
 
+export function normaliseRange(draft) {
+  return draft.from <= draft.to ? { ...draft } : { from: draft.to, to: draft.from };
+}
+
+export function rangePresets(t, today = isoToday()) {
+  return [
+    { key: 'today', label: t.presetToday, from: today, to: today },
+    { key: 'week', label: t.presetWeek, from: today, to: addDays(today, 6) },
+    { key: 'month', label: t.presetMonth, from: today, to: addDays(today, 29) },
+    { key: 'year', label: t.presetYear, from: `${today.slice(0, 4)}-01-01`, to: `${today.slice(0, 4)}-12-31` },
+  ];
+}
+
+export function activePresetKey(range, presets) {
+  return presets.find((preset) => preset.from === range.from && preset.to === range.to)?.key || null;
+}
+
 /* -------------------------------------------------------------- presentation */
 
 export function formatDate(iso, locale) {
@@ -124,15 +144,26 @@ export function formatDate(iso, locale) {
   return locale === 'en' ? `${day}.${month}.${year}` : `${Number(day)}.${Number(month)}.${year}`;
 }
 
+// Finnish drops the repeated year in a range: 9.8.-15.8.2026 rather than
+// 9.8.2026-15.8.2026. Shorter and more idiomatic, which the narrow topbar needs.
+export function formatRange(range, locale) {
+  if (range.from === range.to) return formatDate(range.from, locale);
+  const sameYear = range.from.slice(0, 4) === range.to.slice(0, 4);
+  const start = sameYear
+    ? formatDate(range.from, locale).replace(/\.?\d{4}$/, '.')
+    : formatDate(range.from, locale);
+  return `${start}\u2013${formatDate(range.to, locale)}`;
+}
+
 export function formatPeriod(notice, locale) {
   const span = noticeSpan(notice);
   if (!span) return '';
   if (span.start === span.end) return formatDate(span.start, locale);
-  return `${formatDate(span.start, locale)} – ${formatDate(span.end, locale)}`;
+  return `${formatDate(span.start, locale)}–${formatDate(span.end, locale)}`;
 }
 
-// The permitted windows are what a resident actually wants; a blanket night ban
-// is boilerplate and only worth showing when nothing else was extracted.
+// The permitted hours are what a resident needs. A blanket night ban is standard
+// wording in every decision and is only worth showing when nothing else was found.
 export function displayHours(hours) {
   if (!Array.isArray(hours) || !hours.length) return [];
   const allowed = hours.filter((window) => window.kind === 'allowed');
@@ -164,8 +195,8 @@ export function groupByLocation(notices) {
   return [...groups.values()].sort((a, b) => b.notices.length - a.notices.length);
 }
 
-// Corner buildings share one point under two street addresses, so a group's
-// heading can name a street the individual notice never mentions.
+// Corner buildings share one register point under two street addresses, so a
+// group heading can name a street the individual notice never mentions.
 export function noticeLabelAt(notice, key) {
   const match = (notice.locations || []).find((location) => locationKey(location) === key);
   return match?.label || null;
@@ -175,17 +206,15 @@ export function unlocatedNotices(notices) {
   return notices.filter((notice) => !notice.locations?.length);
 }
 
-// Records predate multi-label classification in older caches, so fall back to
-// the single primary category when the array is missing.
+// Records cached before multi-type classification carry only the primary type.
 export function noticeCategories(notice) {
-  const list = Array.isArray(notice.categories) && notice.categories.length
+  return Array.isArray(notice.categories) && notice.categories.length
     ? notice.categories
     : [notice.category || 'other'];
-  return list;
 }
 
-// A notice counts towards every category it carries, so the totals in the filter
-// add up to more than the number of notices. That is the honest reading.
+// A notice counts towards every type it carries, so these totals sum to more than
+// the number of notices. That is the honest reading of the data.
 export function categoryCounts(notices) {
   const counts = new Map();
   for (const notice of notices) {
@@ -200,125 +229,190 @@ export function matchesFilter(notice, hidden) {
   return noticeCategories(notice).some((category) => !hidden.has(category));
 }
 
-// Only the categories actually on the map, so the legend never lists ten items
-// when three are showing.
-export function legendCategories(notices, hidden, limit = LEGEND_LIMIT) {
-  const present = new Set();
-  for (const notice of notices) {
-    for (const category of noticeCategories(notice)) {
-      if (!hidden.has(category)) present.add(category);
-    }
-  }
-  const ordered = CATEGORY_ORDER.filter((category) => present.has(category));
-  return { shown: ordered.slice(0, limit), overflow: Math.max(0, ordered.length - limit) };
+export function describeArea(polygon, t) {
+  const km2 = polygonAreaKm2(polygon);
+  const size = km2 < 1 ? `${Math.round(km2 * 100) / 100}` : `${Math.round(km2 * 10) / 10}`;
+  return `${size} km², ${polygon.length} ${t.corners}`;
 }
 
 /* -------------------------------------------------------------------- copy */
 
+// Wording follows the City of Helsinki and the Finnish Environment Institute:
+// a meluilmoitus is an "ilmoitus melua tai tärinää aiheuttavasta tilapäisestä
+// toiminnasta" under section 118 of the Environmental Protection Act, and the
+// authority answers it with a "päätös" carrying "määräyksiä".
 const copy = {
   fi: {
     appName: 'MELU',
     region: 'Helsinki',
+    skip: 'Siirry sisältöön',
+    mapLabel: 'Kartta meluilmoituksista',
     period: 'Ajanjakso',
-    from: 'Alkaen',
-    to: 'Päättyen',
-    presetWeek: 'Seuraavat 7 vrk',
+    from: 'Alkaa',
+    to: 'Päättyy',
     presetToday: 'Tänään',
-    presetMonth: 'Seuraavat 30 vrk',
+    presetWeek: '7 vuorokautta',
+    presetMonth: '30 vuorokautta',
     presetYear: 'Tämä vuosi',
-    custom: 'Oma ajanjakso',
     apply: 'Näytä ajanjakso',
+    quickRange: 'Ajanjakson pikavalinnat',
     close: 'Sulje',
     noticeCount: 'meluilmoitusta',
     noticeCountOne: 'meluilmoitus',
+    resultSummary: 'Valitulla ajanjaksolla on',
     empty: 'Valitulla ajanjaksolla ei ole meluilmoituksia.',
-    emptyHint: 'Kokeile pidempää ajanjaksoa.',
-    loading: 'Haetaan meluilmoituksia…',
-    loadError: 'Tietojen haku epäonnistui.',
+    emptyHint: 'Valitse pidempi ajanjakso.',
+    loading: 'Haetaan meluilmoituksia.',
+    loadError: 'Tietojen haku ei onnistunut.',
     retry: 'Yritä uudelleen',
-    here: 'Tässä sijainnissa',
-    tapHint: 'Valitse sijainti kartalta',
-    period_: 'Voimassa',
-    hours: 'Työaika',
+    here: 'Tässä kohteessa',
+    tapHint: 'Valitse kohde kartalta.',
+    validity: 'Voimassa',
+    hours: 'Sallittu työaika',
     nightWork: 'Sisältää yötyötä',
     applicant: 'Ilmoittaja',
-    authority: 'Päättäjä',
-    decided: 'Päätetty',
+    decided: 'Päätös annettu',
     openDecision: 'Avaa päätös',
+    filters: 'Rajaa melun tyypin mukaan',
     categories: 'Melun tyyppi',
     blasting: 'Louhinta ja räjäytys',
     crushing: 'Murskaus ja iskuvasarointi',
     piling: 'Paalutus ja pontitus',
     drilling: 'Poraus',
     demolition: 'Purku ja saneeraus',
-    rail: 'Rata- ja kiskotyö',
+    rail: 'Rata- ja kiskotyöt',
     marine: 'Vesirakentaminen',
     earthworks: 'Maa- ja katutyöt',
-    event: 'Tapahtumat ja konsertit',
-    other: 'Muu',
-    quickRange: 'Pikavalinnat',
-    more: 'muuta',
-    approximate: 'Sijainti on likimääräinen',
-    unlocated: 'Ilman sijaintia',
-    unlocatedBody: 'Näiden ilmoitusten sijaintia ei voitu tunnistaa päätöstekstistä.',
-    locate: 'Näytä sijaintini',
-    layers: 'Suodata',
-    updated: 'Tiedot päivitetty',
+    event: 'Ulkoilmakonsertit ja yleisötilaisuudet',
+    other: 'Muu toiminta',
+    approximate: 'Sijainti on likimääräinen.',
+    unlocated: 'Ilmoitukset ilman sijaintia',
+    unlocatedCount: 'ilmoitusta ilman sijaintia',
+    unlocatedBody: 'Näiden päätösten tekstistä ei tunnistettu sijaintia.',
+    locate: 'Keskitä kartta sijaintiini',
     info: 'Tietoa palvelusta',
-    disclaimer: 'Tiedot on poimittu automaattisesti Helsingin kaupungin päätösteksteistä. Ajat ja sijainnit voivat olla epätarkkoja — tarkista aina alkuperäinen päätös.',
-    sources: 'Lähde: Helsingin kaupungin päätökset ja avoin paikkatieto.',
+    infoLead: 'Palvelu kokoaa Helsingin kaupungin meluilmoituspäätökset kartalle.',
+    infoBody: 'Meluilmoitus on ympäristönsuojelulain 118 §:n mukainen ilmoitus tilapäisestä toiminnasta, joka aiheuttaa erityisen häiritsevää melua tai tärinää. Ilmoituksen käsittelee kaupunkiympäristön toimialan ympäristönsuojelu, joka antaa päätöksessä toimintaa koskevat määräykset.',
+    infoAccuracy: 'Ajanjaksot, työajat ja sijainnit on poimittu päätösteksteistä automaattisesti. Ne voivat olla epätarkkoja tai puutteellisia. Alkuperäinen päätös ratkaisee.',
+    infoPrivacy: 'Vahdit ja niiden alueet tallennetaan vain tämän selaimen muistiin. Palvelussa ei ole palvelinta, joka voisi ottaa tietoja vastaan.',
+    sources: 'Lähteet',
+    sourceDecisions: 'Helsingin kaupungin päätökset',
+    sourceGeo: 'Helsingin kaupungin avoin paikkatieto: osoiteluettelo, nimistö ja aluejako',
+    sourceMap: 'Taustakartta: OpenStreetMap ja CARTO',
+    updated: 'Aineisto päivitetty',
+    disclaimer: 'Tiedot on poimittu päätösteksteistä automaattisesti. Tarkista aina alkuperäinen päätös.',
+    watches: 'Vahdit',
+    watchesLabel: 'Vahdit ja uudet ilmoitukset',
+    watchCount: 'uutta ilmoitusta',
+    watchCountOne: 'uusi ilmoitus',
+    watchEmpty: 'Et ole vielä luonut vahteja.',
+    watchEmptyBody: 'Vahti seuraa valitsemaasi aluetta ja kertoo, kun alueelle tulee uusi meluilmoitus. Tiedot pysyvät selaimessasi.',
+    addWatch: 'Luo vahti',
+    drawArea: 'Piirrä alue kartalle',
+    drawHint: 'Napauta kartalta alueen kulmat. Vähintään kolme kulmaa.',
+    drawUseView: 'Käytä nykyistä karttanäkymää',
+    drawUndo: 'Poista viimeisin kulma',
+    drawFinish: 'Valmis',
+    cancel: 'Peruuta',
+    nameWatch: 'Vahdin nimi',
+    namePlaceholder: 'Esimerkiksi Koti',
+    typesWatched: 'Seurattavat melun tyypit',
+    allTypes: 'Kaikki tyypit',
+    saveWatch: 'Tallenna vahti',
+    dismiss: 'Kuittaa',
+    dismissAll: 'Kuittaa kaikki',
+    dismissAllWatches: 'Kuittaa kaikkien vahtien ilmoitukset',
+    removeWatch: 'Poista vahti',
+    noNew: 'Ei uusia ilmoituksia.',
+    corners: 'kulmaa',
+    watchArea: 'Alue',
+    guardLimit: 'Vahteja voi olla enintään',
   },
   en: {
     appName: 'MELU',
     region: 'Helsinki',
+    skip: 'Skip to content',
+    mapLabel: 'Map of noise notifications',
     period: 'Period',
-    from: 'From',
-    to: 'To',
-    presetWeek: 'Next 7 days',
+    from: 'Starts',
+    to: 'Ends',
     presetToday: 'Today',
-    presetMonth: 'Next 30 days',
+    presetWeek: '7 days',
+    presetMonth: '30 days',
     presetYear: 'This year',
-    custom: 'Custom period',
     apply: 'Show period',
+    quickRange: 'Period shortcuts',
     close: 'Close',
-    noticeCount: 'noise notices',
-    noticeCountOne: 'noise notice',
-    empty: 'No noise notices in the selected period.',
-    emptyHint: 'Try a longer period.',
-    loading: 'Loading noise notices…',
-    loadError: 'Could not load the data.',
+    noticeCount: 'noise notifications',
+    noticeCountOne: 'noise notification',
+    resultSummary: 'The selected period has',
+    empty: 'No noise notifications in the selected period.',
+    emptyHint: 'Choose a longer period.',
+    loading: 'Loading noise notifications.',
+    loadError: 'The data could not be loaded.',
     retry: 'Try again',
-    here: 'At this location',
-    tapHint: 'Choose a location on the map',
-    period_: 'Valid',
-    hours: 'Working hours',
+    here: 'At this site',
+    tapHint: 'Choose a site on the map.',
+    validity: 'Valid',
+    hours: 'Permitted hours',
     nightWork: 'Includes night work',
-    applicant: 'Applicant',
-    authority: 'Decided by',
-    decided: 'Decision date',
+    applicant: 'Notifier',
+    decided: 'Decision issued',
     openDecision: 'Open the decision',
+    filters: 'Filter by type of noise',
     categories: 'Type of noise',
-    blasting: 'Blasting',
+    blasting: 'Blasting and rock excavation',
     crushing: 'Crushing and hammering',
     piling: 'Piling and sheet piling',
     drilling: 'Drilling',
     demolition: 'Demolition and renovation',
-    rail: 'Track and rail work',
+    rail: 'Track and rail works',
     marine: 'Marine construction',
     earthworks: 'Earthworks and street works',
-    event: 'Events and concerts',
-    other: 'Other',
-    quickRange: 'Quick ranges',
-    more: 'more',
-    approximate: 'Location is approximate',
-    unlocated: 'Without a location',
+    event: 'Outdoor concerts and public events',
+    other: 'Other activity',
+    approximate: 'The location is approximate.',
+    unlocated: 'Notifications without a location',
+    unlocatedCount: 'notifications without a location',
     unlocatedBody: 'No location could be identified in these decision texts.',
-    locate: 'Show my location',
-    layers: 'Filter',
-    updated: 'Data updated',
+    locate: 'Centre the map on my location',
     info: 'About this service',
-    disclaimer: 'Details are extracted automatically from City of Helsinki decision texts. Times and locations may be imprecise — always check the original decision.',
-    sources: 'Source: City of Helsinki decisions and open geospatial data.',
+    infoLead: 'This service collects the City of Helsinki noise notification decisions onto a map.',
+    infoBody: 'A noise notification is required under section 118 of the Environmental Protection Act for temporary activity that causes particularly disturbing noise or vibration. It is handled by environmental protection within the Urban Environment Division, whose decision sets the conditions for the activity.',
+    infoAccuracy: 'Periods, working hours and locations are extracted from the decision texts automatically. They may be imprecise or incomplete. The original decision always governs.',
+    infoPrivacy: 'Watches and their areas are stored only in this browser. The service has no server that could receive them.',
+    sources: 'Sources',
+    sourceDecisions: 'City of Helsinki decisions',
+    sourceGeo: 'City of Helsinki open geospatial data: address register, place names and district division',
+    sourceMap: 'Base map: OpenStreetMap and CARTO',
+    updated: 'Data updated',
+    disclaimer: 'Details are extracted from decision texts automatically. Always check the original decision.',
+    watches: 'Watches',
+    watchesLabel: 'Watches and new notifications',
+    watchCount: 'new notifications',
+    watchCountOne: 'new notification',
+    watchEmpty: 'You have not created any watches yet.',
+    watchEmptyBody: 'A watch follows an area you choose and tells you when a new noise notification appears there. Everything stays in your browser.',
+    addWatch: 'Create a watch',
+    drawArea: 'Draw an area on the map',
+    drawHint: 'Tap the corners of the area on the map. At least three corners.',
+    drawUseView: 'Use the current map view',
+    drawUndo: 'Remove the last corner',
+    drawFinish: 'Done',
+    cancel: 'Cancel',
+    nameWatch: 'Watch name',
+    namePlaceholder: 'For example Home',
+    typesWatched: 'Types of noise to follow',
+    allTypes: 'All types',
+    saveWatch: 'Save the watch',
+    dismiss: 'Clear',
+    dismissAll: 'Clear all',
+    dismissAllWatches: 'Clear the notifications of every watch',
+    removeWatch: 'Remove the watch',
+    noNew: 'No new notifications.',
+    corners: 'corners',
+    watchArea: 'Area',
+    guardLimit: 'The maximum number of watches is',
   },
 };
 
@@ -343,8 +437,8 @@ function useNoticeData(range) {
     (async () => {
       setStatus('loading');
       try {
-        // The manifest is 3 kB and changes daily, so it is always fetched fresh;
-        // the cached copy is only a fallback for an offline or failed load.
+        // The manifest is small and changes daily, so it is always fetched fresh.
+        // The cached copy is only a fallback for a failed or offline load.
         let fresh = null;
         try {
           fresh = await loadJson('index.json');
@@ -366,9 +460,9 @@ function useNoticeData(range) {
     return () => { cancelled = true; };
   }, [reloadToken]);
 
-  // Year chunks arrive only when the chosen period actually reaches into them.
-  // Editing the start date before the end date briefly widens the range across
-  // every year in between, so the fetch waits for the range to settle.
+  // Year chunks arrive only when the chosen period reaches into them. Editing the
+  // start date before the end date briefly widens the range across every year in
+  // between, so the fetch waits for the range to settle.
   useEffect(() => {
     if (!manifest) return undefined;
     const missing = chunkKeysForRange(range, manifest).filter((key) => !loaded.current.has(key));
@@ -399,41 +493,101 @@ function useNoticeData(range) {
   return { manifest, notices, status, reload: () => setReloadToken((token) => token + 1) };
 }
 
-/* ------------------------------------------------------------------- markers */
+/* ------------------------------------------------------------------ markers */
 
-function markerIcon(group, locale, text) {
+function markerIcon(group, label) {
   const category = noticeCategories(group.notices[0] || {})[0];
   const colour = CATEGORY_COLOURS[category] || CATEGORY_COLOURS.other;
   const imprecise = IMPRECISE.has(group.location.precision);
   const count = group.notices.length;
   return L.divIcon({
     className: 'melu-marker-wrap',
-    html: `<span class="melu-marker${imprecise ? ' imprecise' : ''}" style="--dot:${colour}" title="${text}">${count > 1 ? count : ''}</span>`,
+    html: `<span class="melu-marker${imprecise ? ' imprecise' : ''}" style="--dot:${colour}">${count > 1 ? count : ''}</span>`,
     iconSize: [26, 26],
     iconAnchor: [13, 13],
   });
 }
 
-/* ----------------------------------------------------------------- the app */
+/* ----------------------------------------------------------- small elements */
 
-// Editing a custom range one field at a time passes through an intermediate range
-// that can span a decade, which would pull down every year chunk in between. The
-// draft is therefore only applied on request, never on each keystroke.
-export function normaliseRange(draft) {
-  return draft.from <= draft.to ? { ...draft } : { from: draft.to, to: draft.from };
+function CategoryChips({ categories, t }) {
+  return (
+    <ul className="category-chips">
+      {categories.map((category) => (
+        <li key={category}>
+          <span className="chip-dot" style={{ background: CATEGORY_COLOURS[category] }} aria-hidden="true" />
+          {t[category]}
+        </li>
+      ))}
+    </ul>
+  );
 }
 
-export function rangePresets(t, today = isoToday()) {
-  return [
-    { key: 'today', label: t.presetToday, from: today, to: today },
-    { key: 'week', label: t.presetWeek, from: today, to: addDays(today, 6) },
-    { key: 'month', label: t.presetMonth, from: today, to: addDays(today, 29) },
-    { key: 'year', label: t.presetYear, from: `${today.slice(0, 4)}-01-01`, to: `${today.slice(0, 4)}-12-31` },
-  ];
+function NoticeCard({ notice, t, locale, label, action }) {
+  const hours = displayHours(notice.hours);
+  return (
+    <article className="notice-card">
+      <h3>{notice.activity || notice.title}</h3>
+      {label && <p className="notice-address">{label}</p>}
+      <CategoryChips categories={noticeCategories(notice)} t={t} />
+      <dl>
+        <div>
+          <dt>{t.validity}</dt>
+          <dd>{formatPeriod(notice, locale)}</dd>
+        </div>
+        {hours.length > 0 && (
+          <div>
+            <dt>{t.hours}</dt>
+            <dd>{hours.map((window) => `${window.from}–${window.to}`).join(', ')}</dd>
+          </div>
+        )}
+        {notice.applicant && (
+          <div>
+            <dt>{t.applicant}</dt>
+            <dd>{notice.applicant}</dd>
+          </div>
+        )}
+      </dl>
+      {notice.nightWork && <p className="night"><Moon size={13} aria-hidden="true" /> {t.nightWork}</p>}
+      <footer>
+        <span>{t.decided} {formatDate(notice.decisionDate, locale)}</span>
+        {notice.url && (
+          <a href={notice.url} target="_blank" rel="noreferrer">
+            {t.openDecision}
+            <ExternalLink size={13} aria-hidden="true" />
+          </a>
+        )}
+      </footer>
+      {action}
+    </article>
+  );
 }
 
-export function activePresetKey(range, presets) {
-  return presets.find((preset) => preset.from === range.from && preset.to === range.to)?.key || null;
+// A dialog that closes on Escape and returns focus to whatever opened it.
+function Overlay({ id, title, onClose, t, children, className = '' }) {
+  const node = useRef(null);
+  useEffect(() => {
+    const opener = document.activeElement;
+    node.current?.querySelector('h2')?.focus();
+    const onKey = (event) => { if (event.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      if (opener instanceof HTMLElement) opener.focus();
+    };
+  }, [onClose]);
+
+  return (
+    <div className={`overlay ${className}`} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} ref={node}>
+      <div className="overlay-head">
+        <h2 id={`${id}-title`} tabIndex={-1}>{title}</h2>
+        <button type="button" className="icon-button" onClick={onClose} aria-label={t.close}>
+          <X size={18} aria-hidden="true" />
+        </button>
+      </div>
+      {children}
+    </div>
+  );
 }
 
 function PeriodControl({ range, setRange, t, locale }) {
@@ -442,32 +596,34 @@ function PeriodControl({ range, setRange, t, locale }) {
   const today = isoToday();
 
   useEffect(() => { if (open) setDraft(range); }, [open, range.from, range.to]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const onKey = (event) => { if (event.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open]);
 
-  const apply = () => {
-    setRange(normaliseRange(draft));
-    setOpen(false);
-  };
   const presets = rangePresets(t, today);
-  const summary = range.from === range.to
-    ? formatDate(range.from, locale)
-    : `${formatDate(range.from, locale)} – ${formatDate(range.to, locale)}`;
+  const summary = formatRange(range, locale);
 
   return (
     <div className="period-wrap">
-      <button type="button" className="period-control" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <CalendarClock size={17} />
+      <button
+        type="button"
+        className="period-control"
+        aria-expanded={open}
+        aria-controls="period-popover"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <CalendarClock size={18} aria-hidden="true" />
         <span>
           <small>{t.period}</small>
           <strong>{summary}</strong>
         </span>
-        <ChevronDown size={15} />
+        <ChevronDown size={16} aria-hidden="true" />
       </button>
       {open && (
-        <div className="period-popover">
-          <div className="popover-head">
-            <strong>{t.period}</strong>
-            <button type="button" aria-label={t.close} onClick={() => setOpen(false)}><X size={15} /></button>
-          </div>
+        <div className="period-popover" id="period-popover">
           <div className="preset-grid">
             {presets.map((preset) => (
               <button
@@ -498,112 +654,177 @@ function PeriodControl({ range, setRange, t, locale }) {
               />
             </label>
           </div>
-          <button type="button" className="apply" onClick={apply}>{t.apply}</button>
+          <button
+            type="button"
+            className="primary"
+            onClick={() => { setRange(normaliseRange(draft)); setOpen(false); }}
+          >
+            {t.apply}
+          </button>
         </div>
       )}
     </div>
   );
 }
 
-function NoticeCard({ notice, t, locale, label }) {
-  const hours = displayHours(notice.hours);
-  const categories = noticeCategories(notice);
+function CategoryPicker({ selected, toggle, t, counts, idPrefix }) {
   return (
-    <article className="notice-card">
-      <header>
-        <span className="category-dot" style={{ background: CATEGORY_COLOURS[categories[0]] }} />
-        <h3>{notice.activity || notice.title}</h3>
-      </header>
-      {label && <p className="notice-address">{label}</p>}
-      <p className="category-chips">
-        {categories.map((category) => (
-          <span key={category} style={{ '--chip': CATEGORY_COLOURS[category] }}>{t[category]}</span>
-        ))}
-      </p>
-      <dl>
-        <div>
-          <dt>{t.period_}</dt>
-          <dd>{formatPeriod(notice, locale)}</dd>
-        </div>
-        {hours.length > 0 && (
-          <div>
-            <dt>{t.hours}</dt>
-            <dd>{hours.map((window) => `${window.from}–${window.to}`).join(', ')}</dd>
-          </div>
-        )}
-        {notice.applicant && (
-          <div>
-            <dt>{t.applicant}</dt>
-            <dd>{notice.applicant}</dd>
-          </div>
-        )}
-      </dl>
-      {notice.nightWork && <p className="night"><Moon size={12} /> {t.nightWork}</p>}
-      <footer>
-        <span>{t.decided} {formatDate(notice.decisionDate, locale)}</span>
-        {notice.url && (
-          <a href={notice.url} target="_blank" rel="noreferrer">
-            {t.openDecision} <ExternalLink size={12} />
-          </a>
-        )}
-      </footer>
-    </article>
+    <ul className="category-picker">
+      {CATEGORY_ORDER.map((category) => (
+        <li key={category}>
+          <label htmlFor={`${idPrefix}-${category}`}>
+            <input
+              id={`${idPrefix}-${category}`}
+              type="checkbox"
+              checked={selected(category)}
+              onChange={() => toggle(category)}
+            />
+            <span className="chip-dot" style={{ background: CATEGORY_COLOURS[category] }} aria-hidden="true" />
+            <span className="picker-label">{t[category]}</span>
+            {counts && <span className="picker-count">{counts.get(category) || 0}</span>}
+          </label>
+        </li>
+      ))}
+    </ul>
   );
 }
+
+/* ----------------------------------------------------------------- the app */
 
 function App() {
   const [locale, setLocale] = useState('fi');
   const [range, setRange] = useState(() => defaultRange());
   const [selectedKey, setSelectedKey] = useState(null);
   const [hidden, setHidden] = useState(() => new Set());
-  const [showFilters, setShowFilters] = useState(false);
-  const [showInfo, setShowInfo] = useState(false);
-  const [showUnlocated, setShowUnlocated] = useState(false);
+  const [panel, setPanel] = useState(null); // 'filters' | 'watches' | 'info'
+  const [guards, setGuards] = useState(() => readGuards(browserStorage()));
+  const [draft, setDraft] = useState(null); // { points, name, categories, closed }
   const t = copy[locale];
 
   const { manifest, notices, status, reload } = useNoticeData(range);
   const mapRef = useRef(null);
   const mapNode = useRef(null);
   const markerLayer = useRef(null);
+  const guardLayer = useRef(null);
+  const draftLayer = useRef(null);
 
+  const allNotices = useMemo(() => [...notices.values()], [notices]);
   const inRange = useMemo(
-    () => [...notices.values()].filter((notice) => noticeOverlapsRange(notice, range)),
-    [notices, range],
+    () => allNotices.filter((notice) => noticeOverlapsRange(notice, range)),
+    [allNotices, range],
   );
   const visible = useMemo(() => inRange.filter((notice) => matchesFilter(notice, hidden)), [inRange, hidden]);
   const groups = useMemo(() => groupByLocation(visible), [visible]);
   const unlocated = useMemo(() => unlocatedNotices(visible), [visible]);
   const counts = useMemo(() => categoryCounts(inRange), [inRange]);
-  const legend = useMemo(() => legendCategories(visible, hidden), [visible, hidden]);
   const presets = useMemo(() => rangePresets(t), [t]);
   const activePreset = activePresetKey(range, presets);
   const selected = groups.find((group) => group.key === selectedKey) || null;
 
+  // Watches are evaluated against everything loaded rather than the chosen period.
+  // The always-loaded current slice holds every recently decided notice, so a new
+  // decision is caught regardless of which period the reader is looking at.
+  const watchResults = useMemo(() => pendingByGuard(allNotices, guards), [allNotices, guards]);
+  const pendingCount = useMemo(() => totalPending(allNotices, guards), [allNotices, guards]);
+
+  useEffect(() => { document.documentElement.lang = locale; }, [locale]);
+
+  const persist = useCallback((next) => {
+    setGuards(next);
+    writeGuards(browserStorage(), next);
+  }, []);
+
   useEffect(() => {
     if (mapRef.current || !mapNode.current) return;
-    const map = L.map(mapNode.current, { center: HELSINKI, zoom: DEFAULT_MAP_ZOOM, zoomControl: true, attributionControl: true });
+    const map = L.map(mapNode.current, {
+      center: HELSINKI, zoom: DEFAULT_MAP_ZOOM, zoomControl: true, attributionControl: true,
+    });
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '© OpenStreetMap, © CARTO',
+      attribution: '&copy; OpenStreetMap, &copy; CARTO',
       maxZoom: 19,
     }).addTo(map);
+    guardLayer.current = L.layerGroup().addTo(map);
+    draftLayer.current = L.layerGroup().addTo(map);
     markerLayer.current = L.layerGroup().addTo(map);
     mapRef.current = map;
   }, []);
+
+  // Drawing: each map click adds a corner.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return undefined;
+    const onClick = (event) => {
+      if (!draft || draft.closed) return;
+      setDraft((current) => ({
+        ...current,
+        points: [...current.points, [event.latlng.lat, event.latlng.lng]],
+      }));
+    };
+    map.on('click', onClick);
+    return () => { map.off('click', onClick); };
+  }, [draft]);
+
+  useEffect(() => {
+    if (!draft || draft.closed) return undefined;
+    const onKey = (event) => {
+      if (event.key === 'Escape') setDraft(null);
+      if (event.key === 'Backspace' && draft.points.length) {
+        event.preventDefault();
+        setDraft((current) => ({ ...current, points: current.points.slice(0, -1) }));
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [draft]);
+
+  useEffect(() => {
+    const layer = draftLayer.current;
+    if (!layer) return;
+    layer.clearLayers();
+    if (!draft?.points.length) return;
+    if (draft.points.length >= MIN_AREA_POINTS) {
+      layer.addLayer(L.polygon(draft.points, { color: '#2457d6', weight: 2, fillOpacity: 0.08, dashArray: '5 4' }));
+    } else if (draft.points.length === 2) {
+      layer.addLayer(L.polyline(draft.points, { color: '#2457d6', weight: 2, dashArray: '5 4' }));
+    }
+    for (const point of draft.points) {
+      layer.addLayer(L.circleMarker(point, {
+        radius: 5, color: '#2457d6', fillColor: '#fbfaf7', fillOpacity: 1, weight: 2,
+      }));
+    }
+  }, [draft]);
+
+  useEffect(() => {
+    const layer = guardLayer.current;
+    if (!layer) return;
+    layer.clearLayers();
+    if (panel !== 'watches') return;
+    for (const guard of guards) {
+      layer.addLayer(L.polygon(guard.polygon, {
+        color: '#1d2923', weight: 1.5, fillOpacity: 0.05, interactive: false,
+      }));
+    }
+  }, [guards, panel]);
 
   useEffect(() => {
     const layer = markerLayer.current;
     if (!layer) return;
     layer.clearLayers();
     for (const group of groups) {
+      const label = `${group.location.label || ''} (${group.notices.length})`;
       const marker = L.marker([group.location.lat, group.location.lon], {
-        icon: markerIcon(group, locale, group.location.label || ''),
+        icon: markerIcon(group, label),
         keyboard: true,
-        alt: group.location.label || '',
+        title: label,
+        alt: label,
       });
       marker.on('click', () => setSelectedKey(group.key));
+      marker.on('keypress', (event) => {
+        if (event.originalEvent.key === 'Enter') setSelectedKey(group.key);
+      });
       layer.addLayer(marker);
     }
-  }, [groups, locale]);
+  }, [groups]);
 
   useEffect(() => {
     if (selectedKey && !groups.some((group) => group.key === selectedKey)) setSelectedKey(null);
@@ -618,39 +839,106 @@ function App() {
     );
   }, []);
 
-  const toggleCategory = (category) => setHidden((previous) => {
+  const toggleHidden = (category) => setHidden((previous) => {
     const next = new Set(previous);
     if (next.has(category)) next.delete(category); else next.add(category);
     return next;
   });
 
+  const startDraw = () => {
+    setPanel(null);
+    setDraft({ points: [], name: '', categories: [], closed: false });
+  };
+
+  const useCurrentView = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const bounds = map.getBounds();
+    setDraft({
+      points: boundsToPolygon({
+        south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
+      }),
+      name: '',
+      categories: [],
+      closed: true,
+    });
+  };
+
+  const saveDraft = () => {
+    const guard = createGuard({
+      id: nextGuardId(guards),
+      name: draft.name,
+      polygon: draft.points,
+      categories: draft.categories,
+      notices: allNotices,
+    });
+    persist([...guards, guard]);
+    setDraft(null);
+    setPanel('watches');
+  };
+
   const total = visible.length;
+  const drawing = Boolean(draft) && !draft.closed;
 
   return (
     <div className="app-shell">
-      <div ref={mapNode} className="map" />
+      <a className="skip-link" href="#results">{t.skip}</a>
+      <div
+        ref={mapNode}
+        className={`map${drawing ? ' drawing' : ''}`}
+        role="application"
+        aria-label={t.mapLabel}
+      />
 
       <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark">M</span>
-          <div>
+        <p className="brand">
+          <span className="brand-mark" aria-hidden="true">M</span>
+          <span className="brand-text">
             <strong>{t.appName}</strong>
             <small>{t.region}</small>
-          </div>
-        </div>
+          </span>
+        </p>
         <PeriodControl range={range} setRange={setRange} t={t} locale={locale} />
         <div className="top-actions">
-          <button type="button" className="icon-button" title={t.layers} aria-label={t.layers} onClick={() => setShowFilters((value) => !value)}>
-            <Layers3 size={17} />
+          <button
+            type="button"
+            className={`icon-button${pendingCount ? ' alert' : ''}`}
+            aria-label={`${t.watchesLabel}: ${pendingCount}`}
+            aria-expanded={panel === 'watches'}
+            onClick={() => setPanel(panel === 'watches' ? null : 'watches')}
+          >
+            <Bell size={18} aria-hidden="true" />
+            {pendingCount > 0 && <span className="badge">{pendingCount}</span>}
           </button>
-          <button type="button" className="icon-button" title={t.locate} aria-label={t.locate} onClick={locateMe}>
-            <LocateFixed size={17} />
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={t.filters}
+            aria-expanded={panel === 'filters'}
+            onClick={() => setPanel(panel === 'filters' ? null : 'filters')}
+          >
+            <SlidersHorizontal size={18} aria-hidden="true" />
           </button>
-          <button type="button" className="icon-button" title={t.info} aria-label={t.info} onClick={() => setShowInfo(true)}>
-            <Info size={17} />
+          <button type="button" className="icon-button" aria-label={t.locate} onClick={locateMe}>
+            <LocateFixed size={18} aria-hidden="true" />
           </button>
-          <button type="button" className="language" onClick={() => setLocale(locale === 'fi' ? 'en' : 'fi')}>
-            {locale === 'fi' ? 'EN' : 'FI'}
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={t.info}
+            aria-expanded={panel === 'info'}
+            onClick={() => setPanel(panel === 'info' ? null : 'info')}
+          >
+            <Info size={18} aria-hidden="true" />
+          </button>
+          <button
+            type="button"
+            className="language"
+            onClick={() => setLocale(locale === 'fi' ? 'en' : 'fi')}
+            lang={locale === 'fi' ? 'en' : 'fi'}
+          >
+            <span className="lang-long">{locale === 'fi' ? 'English' : 'Suomeksi'}</span>
+            <span className="lang-short" aria-hidden="true">{locale === 'fi' ? 'EN' : 'FI'}</span>
           </button>
         </div>
       </header>
@@ -660,7 +948,7 @@ function App() {
           <button
             key={preset.key}
             type="button"
-            className={activePreset === preset.key ? 'active' : ''}
+            aria-pressed={activePreset === preset.key}
             onClick={() => setRange({ from: preset.from, to: preset.to })}
           >
             {preset.label}
@@ -668,60 +956,70 @@ function App() {
         ))}
       </nav>
 
-      {showFilters && (
-        <div className="filter-popover">
-          <p className="popover-title">{t.categories}</p>
-          {CATEGORY_ORDER.map((category) => (
-            <label key={category}>
-              <input type="checkbox" checked={!hidden.has(category)} onChange={() => toggleCategory(category)} />
-              <i className="swatch" style={{ background: CATEGORY_COLOURS[category] }} />
-              <span>{t[category]}</span>
-              <b>{counts.get(category) || 0}</b>
-            </label>
-          ))}
-        </div>
-      )}
+      <main className={`panel${panel ? ' behind' : ''}`} id="results">
+        <p className="visually-hidden" aria-live="polite">
+          {status === 'ready' ? `${t.resultSummary} ${total} ${total === 1 ? t.noticeCountOne : t.noticeCount}.` : t.loading}
+        </p>
 
-      <aside className="panel">
         {status === 'loading' && <div className="card message">{t.loading}</div>}
         {status === 'error' && (
           <div className="card message">
             <p>{t.loadError}</p>
-            <button type="button" className="retry" onClick={reload}><RefreshCw size={13} /> {t.retry}</button>
+            <button type="button" className="primary" onClick={reload}>
+              <RefreshCw size={14} aria-hidden="true" /> {t.retry}
+            </button>
           </div>
         )}
+
         {status === 'ready' && !selected && (
           <div className="card summary">
-            <p className="eyebrow">{t.period}</p>
-            <h2>{total} <small>{total === 1 ? t.noticeCountOne : t.noticeCount}</small></h2>
-            {total === 0 ? (
-              <p className="muted">{t.empty} {t.emptyHint}</p>
-            ) : (
-              <p className="muted"><MapPin size={12} /> {t.tapHint}</p>
-            )}
+            <h1>
+              {total}
+              {' '}
+              <span>{total === 1 ? t.noticeCountOne : t.noticeCount}</span>
+            </h1>
+            <p className="muted">
+              {total === 0 ? `${t.empty} ${t.emptyHint}` : (
+                <>
+                  <MapPin size={14} aria-hidden="true" />
+                  {' '}
+                  {t.tapHint}
+                </>
+              )}
+            </p>
             {unlocated.length > 0 && (
-              <button type="button" className="unlocated-toggle" onClick={() => setShowUnlocated((value) => !value)}>
-                {unlocated.length} · {t.unlocated}
-              </button>
-            )}
-            {showUnlocated && (
-              <div className="unlocated-list">
-                <p className="muted small">{t.unlocatedBody}</p>
-                {unlocated.map((notice) => <NoticeCard key={notice.id} notice={notice} t={t} locale={locale} />)}
-              </div>
+              <details className="unlocated">
+                <summary>{`${unlocated.length} ${t.unlocatedCount}`}</summary>
+                <p className="muted">{t.unlocatedBody}</p>
+                {unlocated.map((notice) => (
+                  <NoticeCard key={notice.id} notice={notice} t={t} locale={locale} />
+                ))}
+              </details>
             )}
           </div>
         )}
+
         {status === 'ready' && selected && (
           <div className="card">
-            <button type="button" className="panel-close" aria-label={t.close} onClick={() => setSelectedKey(null)}><X size={16} /></button>
+            <button
+              type="button"
+              className="icon-button panel-close"
+              aria-label={t.close}
+              onClick={() => setSelectedKey(null)}
+            >
+              <X size={18} aria-hidden="true" />
+            </button>
             <p className="eyebrow">{t.here}</p>
-            <h2 className="place-title">{selected.location.label || t.here}</h2>
+            <h1 className="place-title">{selected.location.label || t.here}</h1>
             {selected.location.district && selected.location.label !== selected.location.district && (
-              <p className="muted small">{selected.location.district}</p>
+              <p className="muted">{selected.location.district}</p>
             )}
             {IMPRECISE.has(selected.location.precision) && (
-              <p className="approximate"><AlertTriangle size={12} /> {t.approximate}</p>
+              <p className="approximate">
+                <AlertTriangle size={14} aria-hidden="true" />
+                {' '}
+                {t.approximate}
+              </p>
             )}
             <div className="notice-list">
               {selected.notices.map((notice) => {
@@ -739,169 +1037,367 @@ function App() {
             </div>
           </div>
         )}
-      </aside>
+      </main>
 
-      {legend.shown.length > 0 && (
-        <div className="map-legend">
-          {legend.shown.map((category) => (
-            <span key={category}><i style={{ background: CATEGORY_COLOURS[category] }} />{t[category]}</span>
-          ))}
-          {legend.overflow > 0 && <span className="legend-more">+{legend.overflow} {t.more}</span>}
+      {panel === 'filters' && (
+        <Overlay id="filters" title={t.categories} onClose={() => setPanel(null)} t={t} className="side">
+          <CategoryPicker
+            idPrefix="filter"
+            selected={(category) => !hidden.has(category)}
+            toggle={toggleHidden}
+            counts={counts}
+            t={t}
+          />
+        </Overlay>
+      )}
+
+      {panel === 'watches' && (
+        <Overlay id="watches" title={t.watches} onClose={() => setPanel(null)} t={t} className="side">
+          {guards.length === 0 ? (
+            <div className="empty-watches">
+              <p>{t.watchEmpty}</p>
+              <p className="muted">{t.watchEmptyBody}</p>
+            </div>
+          ) : (
+            <>
+              {pendingCount > 0 && (
+                <button
+                  type="button"
+                  className="ghost"
+                  onClick={() => persist(clearAllGuards(guards, allNotices))}
+                >
+                  <Check size={14} aria-hidden="true" /> {t.dismissAllWatches}
+                </button>
+              )}
+              <ul className="watch-list">
+                {watchResults.map(({ guard, notices: pending }) => (
+                  <li key={guard.id}>
+                    <div className="watch-head">
+                      <h3>{guard.name || guard.id}</h3>
+                      <p className="muted">
+                        {`${t.watchArea}: ${describeArea(guard.polygon, t)}`}
+                        {guard.categories.length
+                          ? ` · ${guard.categories.map((category) => t[category]).join(', ')}`
+                          : ` · ${t.allTypes}`}
+                      </p>
+                      <p className={pending.length ? 'watch-count alert' : 'watch-count'}>
+                        {pending.length
+                          ? `${pending.length} ${pending.length === 1 ? t.watchCountOne : t.watchCount}`
+                          : t.noNew}
+                      </p>
+                    </div>
+                    {pending.map((notice) => (
+                      <NoticeCard
+                        key={notice.id}
+                        notice={notice}
+                        t={t}
+                        locale={locale}
+                        action={(
+                          <button
+                            type="button"
+                            className="ghost small"
+                            onClick={() => persist(guards.map((item) => (
+                              item.id === guard.id ? acknowledgeNotices(item, [notice.id]) : item)))}
+                          >
+                            <Check size={13} aria-hidden="true" /> {t.dismiss}
+                          </button>
+                        )}
+                      />
+                    ))}
+                    <div className="watch-actions">
+                      {pending.length > 0 && (
+                        <button
+                          type="button"
+                          className="ghost small"
+                          onClick={() => persist(guards.map((item) => (
+                            item.id === guard.id ? clearGuard(item, allNotices) : item)))}
+                        >
+                          <Check size={13} aria-hidden="true" /> {t.dismissAll}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="ghost small danger"
+                        onClick={() => persist(guards.filter((item) => item.id !== guard.id))}
+                      >
+                        <Trash2 size={13} aria-hidden="true" /> {t.removeWatch}
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <button type="button" className="primary" onClick={startDraw}>
+            <Pencil size={14} aria-hidden="true" /> {t.addWatch}
+          </button>
+        </Overlay>
+      )}
+
+      {panel === 'info' && (
+        <Overlay id="info" title={t.info} onClose={() => setPanel(null)} t={t} className="centre">
+          <p className="lead">{t.infoLead}</p>
+          <p>{t.infoBody}</p>
+          <p>{t.infoAccuracy}</p>
+          <p>{t.infoPrivacy}</p>
+          <h3>{t.sources}</h3>
+          <ul className="source-list">
+            <li><a href="https://paatokset.hel.fi/fi/asia?s=meluilmoitus" target="_blank" rel="noreferrer">{t.sourceDecisions}</a></li>
+            <li>{t.sourceGeo}</li>
+            <li>{t.sourceMap}</li>
+          </ul>
+          {manifest && (
+            <p className="muted">
+              {`${t.updated} ${formatDate(manifest.generatedAt.slice(0, 10), locale)} · ${manifest.totalNotices}`}
+            </p>
+          )}
+        </Overlay>
+      )}
+
+      {draft && !draft.closed && (
+        <div className="draw-bar" role="region" aria-label={t.drawArea}>
+          <p>
+            <strong>{t.drawArea}</strong>
+            <span>{t.drawHint}</span>
+          </p>
+          <div className="draw-actions">
+            <button type="button" className="ghost" onClick={useCurrentView}>{t.drawUseView}</button>
+            <button
+              type="button"
+              className="ghost"
+              disabled={!draft.points.length}
+              onClick={() => setDraft({ ...draft, points: draft.points.slice(0, -1) })}
+            >
+              {t.drawUndo}
+            </button>
+            <button type="button" className="ghost" onClick={() => setDraft(null)}>{t.cancel}</button>
+            <button
+              type="button"
+              className="primary"
+              disabled={draft.points.length < MIN_AREA_POINTS}
+              onClick={() => setDraft({ ...draft, closed: true })}
+            >
+              {t.drawFinish}
+            </button>
+          </div>
         </div>
       )}
 
-      {showInfo && (
-        <div className="info-sheet">
-          <button type="button" className="panel-close" aria-label={t.close} onClick={() => setShowInfo(false)}><X size={16} /></button>
-          <h2>{t.info}</h2>
-          <p>{t.disclaimer}</p>
-          <p className="muted small">{t.sources}</p>
-          {manifest && <p className="muted small">{t.updated} {formatDate(manifest.generatedAt.slice(0, 10), locale)} · {manifest.totalNotices}</p>}
-        </div>
+      {draft?.closed && (
+        <Overlay id="new-watch" title={t.addWatch} onClose={() => setDraft(null)} t={t} className="centre">
+          <p className="muted">{`${t.watchArea}: ${describeArea(draft.points, t)}`}</p>
+          <label className="field" htmlFor="watch-name">
+            <span>{t.nameWatch}</span>
+            <input
+              id="watch-name"
+              type="text"
+              value={draft.name}
+              placeholder={t.namePlaceholder}
+              maxLength={40}
+              onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+            />
+          </label>
+          <fieldset>
+            <legend>{`${t.typesWatched} (${t.allTypes.toLowerCase()})`}</legend>
+            <CategoryPicker
+              idPrefix="watch"
+              selected={(category) => draft.categories.includes(category)}
+              toggle={(category) => setDraft({
+                ...draft,
+                categories: draft.categories.includes(category)
+                  ? draft.categories.filter((item) => item !== category)
+                  : [...draft.categories, category],
+              })}
+              t={t}
+            />
+          </fieldset>
+          <button type="button" className="primary" onClick={saveDraft}>{t.saveWatch}</button>
+        </Overlay>
       )}
 
       <footer className="disclaimer">
-        <AlertTriangle size={15} />
-        <span>{t.disclaimer}</span>
+        <AlertTriangle size={16} aria-hidden="true" />
+        <p>{t.disclaimer}</p>
       </footer>
     </div>
   );
 }
 
 const styles = `
-  :root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;--paper:#fbfaf7;--ink:#19201c;--muted:#68716b;--line:rgba(25,32,28,.11);--blue:#2457d6;color:var(--ink);background:#dfe3df;color-scheme:light;font-synthesis:none}
+  :root{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
+    --paper:#fbfaf7;--ink:#19201c;--muted:#5b645e;--line:rgba(25,32,28,.14);
+    --blue:#1f4fc4;--alert:#a32b1f;
+    color:var(--ink);background:#dfe3df;color-scheme:light;font-synthesis:none;
+  }
   *{box-sizing:border-box}
   html,body,#root{margin:0;width:100%;height:100%;overflow:hidden}
   button{font:inherit;color:inherit}
+  h1,h2,h3{font-weight:650;letter-spacing:-.015em}
+  :focus-visible{outline:2px solid var(--blue);outline-offset:2px;border-radius:6px}
+  .visually-hidden{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+  .skip-link{position:absolute;z-index:900;left:12px;top:-60px;padding:10px 14px;border-radius:10px;background:#1d2923;color:#fbfaf7;font-size:14px;text-decoration:none;transition:top .15s}
+  .skip-link:focus{top:12px}
+
   .app-shell{position:relative;width:100%;height:100%;background:#dfe3df}
   .map{position:absolute;inset:0;z-index:0}
+  .map.drawing{cursor:crosshair}
   .leaflet-container{font-family:inherit;background:#dfe3df}
-  .leaflet-control-attribution{font-size:8px!important;background:rgba(251,250,247,.78)!important;color:#6f7771!important}
-  .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 18px 96px 0!important}
-  .leaflet-control-zoom a{border:0!important;color:#222!important;background:#faf9f5!important}
+  .leaflet-control-attribution{font-size:11px!important;background:rgba(251,250,247,.82)!important;color:#5b645e!important}
+  .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 18px 92px 0!important}
+  .leaflet-control-zoom a{border:0!important;color:#19201c!important;background:#faf9f5!important}
 
-  .topbar{position:absolute;z-index:600;left:50%;top:18px;width:min(660px,calc(100% - 36px));height:58px;display:flex;align-items:center;gap:10px;padding:7px 8px;background:rgba(251,250,247,.93);border:1px solid rgba(255,255,255,.78);border-radius:17px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
-  .brand{display:flex;align-items:center;gap:9px;flex:0 0 auto;padding-right:5px}
-  .brand-mark{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:#1d2923;color:#fff;font-size:19px;font-weight:800}
-  .brand div{display:flex;flex-direction:column}
-  .brand strong{font-size:13px;line-height:1;letter-spacing:.11em}
-  .brand small{margin-top:4px;color:#767a76;font-size:8px;font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+  .topbar{position:absolute;z-index:600;left:50%;top:18px;width:min(880px,calc(100% - 36px));display:flex;align-items:center;gap:12px;padding:9px 10px;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
+  .brand{display:flex;align-items:center;gap:10px;margin:0;flex:0 0 auto}
+  .brand-mark{display:grid;place-items:center;flex:0 0 auto;width:38px;height:38px;border-radius:11px;background:#1d2923;color:#fbfaf7;font-size:19px;font-weight:700}
+  .brand-text{display:flex;flex-direction:column}
+  .brand strong{font-size:14px;line-height:1;letter-spacing:.1em}
+  .brand small{margin-top:4px;color:var(--muted);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
 
   .period-wrap{position:relative;flex:1;min-width:0}
-  .period-control{width:100%;height:42px;display:flex;align-items:center;gap:9px;padding:0 11px;border:0;border-radius:12px;background:#f0efe9;color:#47504a;text-align:left;cursor:pointer}
+  .period-control{width:100%;height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;border:0;border-radius:12px;background:#f0efe9;color:var(--ink);text-align:left;cursor:pointer}
   .period-control>svg:first-child{flex:0 0 auto;color:var(--blue)}
-  .period-control>svg:last-child{margin-left:auto;color:#7b837d;transition:transform .18s}
+  .period-control>svg:last-child{margin-left:auto;color:var(--muted);transition:transform .18s}
   .period-control[aria-expanded=true]>svg:last-child{transform:rotate(180deg)}
   .period-control>span{min-width:0;display:flex;flex-direction:column}
-  .period-control small{color:#7a827c;font-size:7px;font-weight:750;letter-spacing:.08em;text-transform:uppercase}
-  .period-control strong{margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px}
-  .period-popover{position:absolute;z-index:720;top:49px;left:50%;width:min(340px,calc(100vw - 20px));padding:15px;border:1px solid rgba(255,255,255,.9);border-radius:18px;background:rgba(251,250,247,.98);box-shadow:0 18px 54px rgba(22,31,26,.2);backdrop-filter:blur(22px);transform:translateX(-50%)}
-  .popover-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
-  .popover-head>strong{font-size:13px}
-  .popover-head button{width:29px;height:29px;display:grid;place-items:center;border:0;border-radius:50%;background:#efeee9;cursor:pointer}
-  .preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px}
-  .preset-grid button{height:38px;border:0;border-radius:11px;background:#f0efe9;color:#47504a;font-size:11px;font-weight:650;cursor:pointer}
-  .preset-grid button.active{background:#e7ecfa;color:var(--blue)}
-  .date-fields{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:12px}
-  .date-fields label{display:flex;flex-direction:column;gap:6px}
-  .date-fields span{color:#737b75;font-size:8px;font-weight:750;letter-spacing:.07em;text-transform:uppercase}
-  .date-fields input{height:40px;padding:0 10px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);font:700 12px inherit;outline:0}
-  .apply{width:100%;height:40px;margin-top:11px;border:0;border-radius:11px;background:#1d2923;color:#fff;font-size:11px;font-weight:700;cursor:pointer}
+  .period-control small{color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+  .period-control strong{margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:650}
+  .period-popover{position:absolute;z-index:720;top:52px;left:0;width:min(360px,calc(100vw - 24px));padding:16px;border:1px solid rgba(255,255,255,.9);border-radius:16px;background:var(--paper);box-shadow:0 18px 54px rgba(22,31,26,.2)}
+  .preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .preset-grid button{height:42px;border:1px solid var(--line);border-radius:11px;background:var(--paper);color:var(--ink);font-size:13px;cursor:pointer}
+  .preset-grid button.active{border-color:#1d2923;background:#1d2923;color:var(--paper)}
+  .date-fields{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+  .date-fields label,.field{display:flex;flex-direction:column;gap:6px}
+  .date-fields span,.field>span{color:var(--muted);font-size:12px}
+  .date-fields input,.field input{height:44px;padding:0 11px;border:1px solid var(--line);border-radius:11px;background:#fff;color:var(--ink);font:650 14px inherit}
 
-  .top-actions{display:flex;align-items:center;gap:5px;flex:0 0 auto}
-  .icon-button{width:40px;height:40px;display:grid;place-items:center;border:0;border-radius:12px;background:transparent;color:#515a54;cursor:pointer;transition:.18s}
-  .icon-button:hover{background:#f0efe9;color:var(--blue)}
-  .language{height:36px;padding:0 10px;border:0;border-radius:10px;background:transparent;color:#515a54;font-size:10px;font-weight:700;cursor:pointer}
+  .top-actions{display:flex;align-items:center;gap:4px;flex:0 0 auto}
+  .icon-button{position:relative;width:44px;height:44px;display:grid;place-items:center;border:0;border-radius:12px;background:transparent;color:var(--ink);cursor:pointer;transition:background .15s}
+  .icon-button:hover{background:#f0efe9}
+  .icon-button.alert{color:var(--alert)}
+  .badge{position:absolute;top:5px;right:4px;min-width:19px;height:19px;padding:0 5px;display:grid;place-items:center;border-radius:10px;background:var(--alert);color:#fff;font-size:11px;font-weight:700}
+  .language{height:38px;padding:0 12px;border:1px solid var(--line);border-radius:11px;background:transparent;color:var(--ink);font-size:13px;cursor:pointer;white-space:nowrap}
   .language:hover{background:#f0efe9}
 
-  .quick-ranges{position:absolute;z-index:590;left:50%;top:84px;display:flex;gap:6px;max-width:calc(100% - 36px);padding:5px;border:1px solid rgba(255,255,255,.7);border-radius:14px;background:rgba(251,250,247,.92);box-shadow:0 6px 22px rgba(28,38,32,.11);backdrop-filter:blur(16px);transform:translateX(-50%);overflow-x:auto;scrollbar-width:none}
+  .quick-ranges{position:absolute;z-index:590;left:50%;top:88px;display:flex;gap:7px;max-width:calc(100% - 36px);padding:6px;border:1px solid rgba(255,255,255,.75);border-radius:14px;background:rgba(251,250,247,.94);box-shadow:0 6px 22px rgba(28,38,32,.11);backdrop-filter:blur(16px);transform:translateX(-50%);overflow-x:auto;scrollbar-width:none}
   .quick-ranges::-webkit-scrollbar{display:none}
-  .quick-ranges button{flex:0 0 auto;height:32px;padding:0 13px;border:0;border-radius:10px;background:transparent;color:#515a54;font-size:11px;font-weight:650;white-space:nowrap;cursor:pointer}
+  .quick-ranges button{flex:0 0 auto;height:34px;padding:0 14px;border:0;border-radius:10px;background:transparent;color:var(--ink);font-size:13px;white-space:nowrap;cursor:pointer}
   .quick-ranges button:hover{background:#f0efe9}
-  .quick-ranges button.active{background:#1d2923;color:#fbfaf7}
+  .quick-ranges button[aria-pressed=true]{background:#1d2923;color:var(--paper)}
 
-  .filter-popover{position:absolute;z-index:620;right:calc(50% - 330px);top:126px;width:266px;padding:9px;border:1px solid rgba(255,255,255,.8);border-radius:16px;background:rgba(251,250,247,.97);box-shadow:0 14px 42px rgba(25,34,29,.16);backdrop-filter:blur(20px)}
-  .popover-title{margin:0;padding:7px 9px 9px;color:#6d726d;font-size:9px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
-  .filter-popover label{display:grid;grid-template-columns:14px 10px 1fr auto;align-items:center;gap:9px;padding:9px;border-radius:10px;font-size:11px;cursor:pointer}
-  .filter-popover label:hover{background:#f0efe9}
-  .filter-popover .swatch{width:9px;height:9px;border-radius:3px}
-  .filter-popover b{color:#7a827c;font-size:10px}
-
-  .panel{position:absolute;z-index:500;left:18px;top:136px;bottom:96px;width:372px;overflow:auto;scrollbar-width:none}
+  .panel{position:absolute;z-index:500;left:18px;top:140px;bottom:92px;width:392px;overflow:auto;scrollbar-width:none}
   .panel::-webkit-scrollbar{display:none}
-  .card{position:relative;padding:21px 20px 16px;background:rgba(251,250,247,.98);border:1px solid rgba(255,255,255,.88);border-radius:20px;box-shadow:0 16px 46px rgba(24,33,28,.16);backdrop-filter:blur(22px)}
-  .card.message{display:flex;flex-direction:column;gap:11px;color:var(--muted);font-size:12px}
-  .panel-close{position:absolute;right:12px;top:11px;width:32px;height:32px;display:grid;place-items:center;border:0;border-radius:50%;background:transparent;color:var(--muted);cursor:pointer}
-  .eyebrow{margin:0;color:#7a817c;font-size:8px;font-weight:700;letter-spacing:.1em;text-transform:uppercase}
-  .summary h2{margin:11px 0 6px;font-size:34px;letter-spacing:-.04em}
-  .summary h2 small{font-size:12px;font-weight:600;letter-spacing:0;color:#777b77}
-  .place-title{margin:10px 0 4px;font-size:24px;letter-spacing:-.03em}
-  .muted{display:flex;align-items:center;gap:6px;margin:6px 0 0;color:var(--muted);font-size:11px;line-height:1.5}
-  .muted.small{font-size:9px}
-  .approximate{display:flex;align-items:center;gap:6px;margin:10px 0 0;padding:8px 9px;border-radius:9px;background:#f4eee2;color:#8a6420;font-size:9px}
-  .retry{display:inline-flex;align-items:center;gap:7px;height:36px;padding:0 13px;border:0;border-radius:10px;background:#1d2923;color:#fff;font-size:11px;font-weight:650;cursor:pointer}
-  .unlocated-toggle{margin-top:13px;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:#515a54;font-size:10px;font-weight:650;cursor:pointer}
-  .unlocated-list{margin-top:11px}
+  .card{position:relative;padding:22px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 16px 46px rgba(24,33,28,.16)}
+  .card.message{display:flex;flex-direction:column;gap:12px;color:var(--muted);font-size:14px}
+  .panel-close{position:absolute;right:12px;top:12px}
+  .eyebrow{margin:0;color:var(--muted);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+  .summary h1{margin:0 0 8px;font-size:40px;line-height:1}
+  .summary h1 span{font-size:15px;font-weight:500;letter-spacing:0;color:var(--muted)}
+  .place-title{margin:10px 0 4px;font-size:25px}
+  .muted{display:flex;align-items:center;gap:7px;margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.55}
+  .approximate{display:flex;align-items:center;gap:7px;margin:12px 0 0;padding:10px 11px;border-radius:10px;background:#f4eee2;color:#7a5716;font-size:13px}
+  .unlocated{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+  .unlocated summary{font-size:13px;cursor:pointer}
 
-  .notice-list{margin-top:13px}
-  .notice-card{padding:13px 0;border-top:1px solid var(--line)}
-  .notice-card header{display:grid;grid-template-columns:9px 1fr;align-items:baseline;gap:9px}
-  .category-dot{width:9px;height:9px;border-radius:50%}
-  .notice-card h3{margin:0;font-size:13px;line-height:1.35;letter-spacing:-.01em}
-  .notice-address{margin:5px 0 0 18px;color:var(--muted);font-size:9px;font-weight:650}
-  .category-chips{display:flex;flex-wrap:wrap;gap:5px;margin:8px 0 0 18px}
-  .category-chips span{padding:3px 7px;border-radius:6px;background:color-mix(in srgb, var(--chip) 13%, transparent);color:var(--chip);font-size:8px;font-weight:750;letter-spacing:.02em}
-  .notice-card dl{display:flex;flex-wrap:wrap;gap:7px;margin:10px 0 0}
-  .notice-card dl div{flex:1 1 auto;min-width:96px;padding:8px 10px;border-radius:10px;background:#f0efe9}
-  .notice-card dt{margin:0;color:#7a827c;font-size:7px;font-weight:750;letter-spacing:.07em;text-transform:uppercase}
-  .notice-card dd{margin:3px 0 0;font-size:11px;font-weight:650}
-  .notice-card .night{display:flex;align-items:center;gap:6px;margin:9px 0 0;color:#5b4a86;font-size:9px;font-weight:650}
-  .notice-card footer{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px;color:#8d918d;font-size:8px}
-  .notice-card footer a{display:inline-flex;align-items:center;gap:5px;color:var(--blue);font-size:9px;font-weight:700;text-decoration:none}
+  .notice-list{margin-top:8px}
+  .notice-card{padding:16px 0;border-top:1px solid var(--line)}
+  .notice-card h3{margin:0;font-size:15px;line-height:1.4}
+  .notice-address{margin:6px 0 0;color:var(--muted);font-size:13px}
+  .category-chips{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0 0;padding:0;list-style:none}
+  .category-chips li{display:flex;align-items:center;gap:6px;padding:4px 9px;border-radius:8px;background:#f0efe9;font-size:12px}
+  .chip-dot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
+  .notice-card dl{display:flex;flex-wrap:wrap;gap:8px;margin:11px 0 0}
+  .notice-card dl div{flex:1 1 auto;min-width:110px;padding:9px 11px;border-radius:10px;background:#f0efe9}
+  .notice-card dt{margin:0;color:var(--muted);font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+  .notice-card dd{margin:4px 0 0;font-size:14px;font-weight:650}
+  .notice-card .night{display:flex;align-items:center;gap:7px;margin:10px 0 0;color:#4f4270;font-size:13px}
+  .notice-card footer{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:12px;color:var(--muted);font-size:12px}
+  .notice-card footer a{display:inline-flex;align-items:center;gap:6px;color:var(--blue);font-size:13px;font-weight:650}
 
-  .map-legend{position:absolute;z-index:440;left:18px;bottom:74px;display:flex;flex-wrap:wrap;align-items:center;gap:11px;max-width:372px;padding:8px 11px;border:1px solid rgba(255,255,255,.76);border-radius:16px;background:rgba(251,250,247,.88);box-shadow:0 7px 24px rgba(25,34,29,.08);backdrop-filter:blur(14px);color:#5d665f}
-  .map-legend span{display:flex;align-items:center;gap:5px;font-size:8px;font-weight:700;white-space:nowrap}
-  .map-legend .legend-more{color:#8b938c}
-  .map-legend i{width:8px;height:8px;border-radius:50%}
+  .overlay{position:absolute;z-index:700;padding:20px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 22px 60px rgba(22,31,26,.24);overflow:auto;scrollbar-width:none}
+  .overlay::-webkit-scrollbar{display:none}
+  .overlay.side{right:18px;top:140px;bottom:92px;width:392px}
+  .overlay.centre{left:50%;top:50%;width:min(480px,calc(100% - 36px));max-height:min(76vh,720px);transform:translate(-50%,-50%)}
+  .overlay-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
+  .overlay-head h2{margin:0;font-size:19px;outline:0}
+  .overlay p{margin:0 0 10px;font-size:14px;line-height:1.6}
+  .overlay .lead{font-size:15px;font-weight:650}
+  .overlay h3{margin:18px 0 8px;font-size:14px}
+  .source-list{margin:0;padding-left:18px;font-size:13px;line-height:1.7;color:var(--muted)}
+  .source-list a{color:var(--blue)}
 
-  .info-sheet{position:absolute;z-index:700;left:50%;top:50%;width:min(440px,calc(100% - 36px));padding:24px;border-radius:20px;background:rgba(251,250,247,.99);box-shadow:0 22px 60px rgba(22,31,26,.24);transform:translate(-50%,-50%)}
-  .info-sheet h2{margin:0 0 10px;font-size:19px}
-  .info-sheet p{margin:0 0 8px;color:var(--muted);font-size:11px;line-height:1.6}
+  .category-picker{margin:0;padding:0;list-style:none}
+  .category-picker label{display:grid;grid-template-columns:auto auto 1fr auto;align-items:center;gap:11px;padding:11px 9px;border-radius:10px;font-size:14px;cursor:pointer}
+  .category-picker label:hover{background:#f0efe9}
+  .category-picker input{width:18px;height:18px;accent-color:#1d2923}
+  .picker-count{color:var(--muted);font-size:13px}
 
-  .disclaimer{position:absolute;z-index:600;left:18px;right:18px;bottom:16px;display:flex;align-items:center;gap:10px;padding:10px 14px;background:rgba(26,31,28,.94);border-radius:12px;color:#f3f1e9;box-shadow:0 8px 30px rgba(16,21,18,.22);backdrop-filter:blur(12px)}
+  .primary{display:inline-flex;align-items:center;justify-content:center;gap:8px;width:100%;height:46px;margin-top:14px;padding:0 16px;border:0;border-radius:12px;background:#1d2923;color:var(--paper);font-size:14px;font-weight:650;cursor:pointer}
+  .primary:disabled{background:#c3c7c2;cursor:not-allowed}
+  .ghost{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:40px;padding:0 14px;border:1px solid var(--line);border-radius:11px;background:transparent;color:var(--ink);font-size:13px;cursor:pointer}
+  .ghost:hover{background:#f0efe9}
+  .ghost:disabled{color:#9aa09b;cursor:not-allowed}
+  .ghost.small{height:34px;padding:0 11px;font-size:12px}
+  .ghost.danger{color:var(--alert);border-color:rgba(163,43,31,.3)}
+
+  .watch-list{margin:14px 0 0;padding:0;list-style:none}
+  .watch-list>li{padding:14px 0;border-top:1px solid var(--line)}
+  .watch-head h3{margin:0;font-size:16px}
+  .watch-count{margin:8px 0 0;font-size:13px;font-weight:650;color:var(--muted)}
+  .watch-count.alert{color:var(--alert)}
+  .watch-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .empty-watches p{margin:0 0 8px}
+  fieldset{margin:14px 0 0;padding:0;border:0}
+  legend{padding:0;color:var(--muted);font-size:12px}
+
+  .draw-bar{position:absolute;z-index:650;left:50%;bottom:84px;width:min(620px,calc(100% - 36px));display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:16px;background:var(--paper);box-shadow:0 16px 46px rgba(24,33,28,.2);transform:translateX(-50%)}
+  .draw-bar p{display:flex;flex-direction:column;gap:4px;margin:0;font-size:13px}
+  .draw-bar strong{font-size:14px}
+  .draw-bar span{color:var(--muted)}
+  .draw-actions{display:flex;flex-wrap:wrap;gap:8px}
+  .draw-actions .primary{width:auto;height:40px;margin:0}
+
+  .disclaimer{position:absolute;z-index:600;left:18px;right:18px;bottom:16px;display:flex;align-items:center;gap:11px;padding:12px 16px;background:#1a1f1c;border-radius:12px;color:#f3f1e9;box-shadow:0 8px 30px rgba(16,21,18,.22)}
   .disclaimer>svg{flex:0 0 auto;color:#f2b64b}
-  .disclaimer span{font-size:9px;line-height:1.45}
+  .disclaimer p{margin:0;font-size:13px;line-height:1.5}
 
-  .melu-marker{display:grid;place-items:center;width:26px;height:26px;border:2.5px solid #fbfaf7;border-radius:50%;background:var(--dot);color:#fff;font-size:10px;font-weight:800;box-shadow:0 4px 12px rgba(18,26,22,.3)}
+  .melu-marker{display:grid;place-items:center;width:26px;height:26px;border:2.5px solid var(--paper);border-radius:50%;background:var(--dot);color:#fff;font-size:12px;font-weight:700;box-shadow:0 4px 12px rgba(18,26,22,.3)}
   /* Approximate points read as hollow, so a district centroid is never mistaken
      for a surveyed address. */
-  .melu-marker.imprecise{border-color:var(--dot);background:#fbfaf7;color:var(--dot);box-shadow:0 3px 9px rgba(18,26,22,.2)}
+  .melu-marker.imprecise{border-color:var(--dot);background:var(--paper);color:var(--dot);box-shadow:0 3px 9px rgba(18,26,22,.2)}
 
-  /* Below this the topbar cannot hold the date and five controls at once; the
-     quick-range row already shows the selected period, so the locate button goes. */
-  @media(max-width:430px){
-    .top-actions .icon-button:nth-of-type(2){display:none}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+  @media(max-width:980px){
+    .topbar{left:12px;right:12px;top:12px;width:auto;transform:none}
+    .brand-text{display:none}
+    .quick-ranges{left:12px;right:12px;max-width:none;top:78px;justify-content:flex-start;transform:none}
+    .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:88px;width:auto;max-height:52vh}
+    /* On one column the results and a side panel would stack on top of each other. */
+    .panel.behind{display:none}
+    .disclaimer{left:12px;right:12px;bottom:12px;padding:10px 12px}
+    .disclaimer p{font-size:12px}
+    .draw-bar{left:12px;right:12px;bottom:78px;width:auto;transform:none}
+    .leaflet-control-zoom{margin:0 12px 150px 0!important}
   }
 
-  @media(max-width:820px){
-    .topbar{left:10px;right:10px;top:10px;width:auto;height:54px;gap:6px;transform:none}
-    .brand div{display:none}
-    .brand{padding-right:0}
-    /* The date summary alone is legible at this width; the field label is not. */
-    .period-control{gap:7px;padding:0 9px}
+  .lang-short{display:none}
+
+  @media(max-width:560px){
     .period-control small{display:none}
-    .period-control strong{font-size:12px}
-    .icon-button{width:34px;height:34px;border-radius:10px}
-    .language{height:32px;padding:0 7px}
-    .top-actions{gap:1px}
-    .quick-ranges{left:10px;right:10px;top:72px;max-width:none;justify-content:flex-start;transform:none}
-    .period-wrap{min-width:104px}
-    .filter-popover{right:10px;top:118px}
-    .panel{left:10px;right:10px;top:auto;bottom:104px;width:auto;max-height:46vh}
-    .map-legend{display:none}
-    .disclaimer{left:10px;right:10px;bottom:10px;padding:8px 10px}
-    .disclaimer span{font-size:8px}
-    .leaflet-control-zoom{margin:0 10px 150px 0!important}
+    .language{padding:0 10px}
+    .lang-long{display:none}
+    .lang-short{display:inline}
+    .icon-button{width:40px;height:40px}
+    .summary h1{font-size:34px}
+    /* The period and the watch bell must stay reachable; locating is a convenience. */
+    .top-actions .icon-button:nth-of-type(3){display:none}
+    .period-control strong{font-size:13px}
+  }
+
+  /* At phone width the date must stay readable, so the decorative mark gives way. */
+  @media(max-width:430px){
+    .brand{display:none}
   }
 `;
 

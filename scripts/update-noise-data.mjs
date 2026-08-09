@@ -56,7 +56,7 @@ async function fetchDecisions({ backfill }) {
   const first = await fetchPage(0, PAGE_SIZE);
   const total = first.hits?.total?.value ?? 0;
   if (!Array.isArray(first.hits?.hits) || first.hits.hits.length === 0) {
-    throw new Error('Decision index returned no results — refusing to publish');
+    throw new Error('Decision index returned no results, refusing to publish');
   }
   const documents = first.hits.hits.map((hit) => hit._source);
   const pages = backfill ? Math.ceil(total / PAGE_SIZE) : INCREMENTAL_PAGES;
