@@ -891,29 +891,51 @@ function App() {
       />
 
       <header className="topbar">
-        <PeriodControl range={range} setRange={setRange} t={t} locale={locale} />
-        <div className="top-actions">
-          <button
-            type="button"
-            className={`icon-button${pendingCount ? ' alert' : ''}`}
-            aria-label={`${t.watchesLabel}: ${pendingCount}`}
-            aria-expanded={panel === 'watches'}
-            onClick={() => setPanel(panel === 'watches' ? null : 'watches')}
-          >
-            <Bell size={18} aria-hidden="true" />
-            {pendingCount > 0 && <span className="badge">{pendingCount}</span>}
-          </button>
-          <button type="button" className="icon-button locate" aria-label={t.locate} onClick={locateMe}>
-            <LocateFixed size={18} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="language"
-            aria-label={locale === 'fi' ? 'FI, vaihda kieleksi englanti' : 'EN, switch the language to Finnish'}
-            onClick={() => setLocale(locale === 'fi' ? 'en' : 'fi')}
-          >
-            {locale === 'fi' ? 'FI' : 'EN'}
-          </button>
+        <div className="topbar-row">
+          <PeriodControl range={range} setRange={setRange} t={t} locale={locale} />
+          <div className="top-actions">
+            <button
+              type="button"
+              className={`icon-button${pendingCount ? ' alert' : ''}`}
+              aria-label={`${t.watchesLabel}: ${pendingCount}`}
+              aria-expanded={panel === 'watches'}
+              onClick={() => setPanel(panel === 'watches' ? null : 'watches')}
+            >
+              <Bell size={18} aria-hidden="true" />
+              {pendingCount > 0 && <span className="badge">{pendingCount}</span>}
+            </button>
+            <button type="button" className="icon-button locate" aria-label={t.locate} onClick={locateMe}>
+              <LocateFixed size={18} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              className="language"
+              aria-label={locale === 'fi' ? 'FI, vaihda kieleksi englanti' : 'EN, switch the language to Finnish'}
+              onClick={() => setLocale(locale === 'fi' ? 'en' : 'fi')}
+            >
+              {locale === 'fi' ? 'FI' : 'EN'}
+            </button>
+          </div>
+        </div>
+        <div className="topbar-row legend-row">
+          <div className="legend" role="group" aria-label={t.filters}>
+            {CATEGORY_ORDER.map((category) => (
+              <button
+                key={category}
+                type="button"
+                aria-pressed={!hidden.has(category)}
+                onClick={() => toggleHidden(category)}
+              >
+                <span className="chip-dot" style={{ background: CATEGORY_COLOURS[category] }} aria-hidden="true" />
+                {t[category]}
+                <b>{counts.get(category) || 0}</b>
+              </button>
+            ))}
+          </div>
+          <p className="legend-note">
+            <span className="chip-dot hollow" aria-hidden="true" />
+            {t.approximateLegend}
+          </p>
         </div>
       </header>
 
@@ -1161,37 +1183,15 @@ function App() {
         </Overlay>
       )}
 
-      <footer className="bottom-bar">
-        <div className="legend" role="group" aria-label={t.filters}>
-          {CATEGORY_ORDER.map((category) => (
-            <button
-              key={category}
-              type="button"
-              aria-pressed={!hidden.has(category)}
-              onClick={() => toggleHidden(category)}
-            >
-              <span className="chip-dot" style={{ background: CATEGORY_COLOURS[category] }} aria-hidden="true" />
-              {t[category]}
-              <b>{counts.get(category) || 0}</b>
-            </button>
-          ))}
-        </div>
-        <div className="bottom-end">
-          <p className="legend-note">
-            <span className="chip-dot hollow" aria-hidden="true" />
-            {t.approximateLegend}
-          </p>
-          <button
-            type="button"
-            className="info-trigger"
-            aria-label={t.info}
-            aria-expanded={panel === 'info'}
-            onClick={() => setPanel(panel === 'info' ? null : 'info')}
-          >
-            <Info size={18} aria-hidden="true" />
-          </button>
-        </div>
-      </footer>
+      <button
+        type="button"
+        className="info-trigger"
+        aria-label={t.info}
+        aria-expanded={panel === 'info'}
+        onClick={() => setPanel(panel === 'info' ? null : 'info')}
+      >
+        <Info size={20} aria-hidden="true" />
+      </button>
     </div>
   );
 }
@@ -1217,10 +1217,13 @@ const styles = `
   .map.drawing{cursor:crosshair}
   .leaflet-container{font-family:inherit;background:#dfe3df}
   .leaflet-control-attribution{font-size:11px!important;background:rgba(251,250,247,.82)!important;color:#5b645e!important}
-  .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 18px 104px 0!important}
+  .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 18px 76px 0!important}
   .leaflet-control-zoom a{border:0!important;color:#19201c!important;background:#faf9f5!important}
 
-  .topbar{position:absolute;z-index:600;left:50%;top:18px;width:max-content;max-width:calc(100% - 36px);display:flex;align-items:center;gap:12px;padding:9px 10px;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
+  .topbar{position:absolute;z-index:600;left:50%;top:18px;width:max-content;max-width:calc(100% - 36px);display:flex;flex-direction:column;overflow:hidden;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
+  .topbar-row{display:flex;align-items:center;gap:12px;padding:9px 10px}
+  .topbar-row + .topbar-row{border-top:1px solid var(--line)}
+  .legend-row{justify-content:space-between;gap:18px}
 
   .period-wrap{position:relative;flex:0 0 auto;width:250px}
   .period-control{width:100%;height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;border:0;border-radius:12px;background:#f0efe9;color:var(--ink);text-align:left;cursor:pointer}
@@ -1250,7 +1253,7 @@ const styles = `
   .language:hover{background:#f0efe9}
 
 
-  .panel{position:absolute;z-index:500;left:18px;top:88px;bottom:104px;width:392px;overflow:auto;scrollbar-width:none}
+  .panel{position:absolute;z-index:500;left:18px;top:150px;bottom:76px;width:392px;overflow:auto;scrollbar-width:none}
   .panel::-webkit-scrollbar{display:none}
   .card{position:relative;padding:22px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 16px 46px rgba(24,33,28,.16)}
   .card.message{display:flex;flex-direction:column;gap:12px;color:var(--muted);font-size:14px}
@@ -1280,7 +1283,7 @@ const styles = `
 
   .overlay{position:absolute;z-index:700;padding:20px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 22px 60px rgba(22,31,26,.24);overflow:auto;scrollbar-width:none}
   .overlay::-webkit-scrollbar{display:none}
-  .overlay.side{right:18px;top:88px;bottom:104px;width:392px}
+  .overlay.side{right:18px;top:150px;bottom:76px;width:392px}
   .overlay.centre{left:50%;top:50%;width:min(480px,calc(100% - 36px));max-height:min(76vh,720px);transform:translate(-50%,-50%)}
   .overlay-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}
   .overlay-head h2{margin:0;font-size:19px;outline:0}
@@ -1314,14 +1317,13 @@ const styles = `
   fieldset{margin:14px 0 0;padding:0;border:0}
   legend{padding:0;color:var(--muted);font-size:12px}
 
-  .draw-bar{position:absolute;z-index:650;left:50%;bottom:96px;width:min(620px,calc(100% - 36px));display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:16px;background:var(--paper);box-shadow:0 16px 46px rgba(24,33,28,.2);transform:translateX(-50%)}
+  .draw-bar{position:absolute;z-index:650;left:50%;bottom:18px;width:min(620px,calc(100% - 36px));display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:16px;background:var(--paper);box-shadow:0 16px 46px rgba(24,33,28,.2);transform:translateX(-50%)}
   .draw-bar p{display:flex;flex-direction:column;gap:4px;margin:0;font-size:13px}
   .draw-bar strong{font-size:14px}
   .draw-bar span{color:var(--muted)}
   .draw-actions{display:flex;flex-wrap:wrap;gap:8px}
   .draw-actions .primary{width:auto;height:40px;margin:0}
 
-  .bottom-bar{position:absolute;z-index:600;left:18px;right:18px;bottom:16px;display:flex;align-items:center;justify-content:space-between;gap:20px;padding:10px 14px;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:14px;box-shadow:0 8px 30px rgba(28,38,32,.13);backdrop-filter:blur(16px)}
   .legend{display:flex;gap:6px;flex:0 0 auto;overflow-x:auto;scrollbar-width:none}
   .legend::-webkit-scrollbar{display:none}
   .legend button{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);font-size:13px;white-space:nowrap;cursor:pointer;transition:opacity .15s}
@@ -1333,9 +1335,8 @@ const styles = `
   .chip-dot.hollow{background:var(--paper);box-shadow:inset 0 0 0 2px var(--muted)}
   .card-note{margin:14px 0 0;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;line-height:1.5}
   .field-hint{margin:4px 0 8px;color:var(--muted);font-size:12px}
-  .bottom-end{display:flex;align-items:center;gap:12px;flex:0 0 auto}
-  .info-trigger{width:36px;height:36px;flex:0 0 auto;display:grid;place-items:center;border:1px solid var(--line);border-radius:50%;background:transparent;color:var(--ink);cursor:pointer}
-  .info-trigger:hover{background:#f0efe9;color:var(--blue)}
+  .info-trigger{position:absolute;z-index:560;right:18px;bottom:18px;width:44px;height:44px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.82);border-radius:50%;background:rgba(251,250,247,.95);color:var(--ink);box-shadow:0 7px 24px rgba(25,34,29,.13);backdrop-filter:blur(16px);cursor:pointer}
+  .info-trigger:hover{background:#fff;color:var(--blue)}
   .unlocated.card{padding:14px 18px}
   .unlocated summary{font-size:13px;cursor:pointer}
 
@@ -1349,17 +1350,12 @@ const styles = `
   @media(max-width:980px){
     .topbar{top:12px;max-width:calc(100% - 24px);gap:8px}
     .brand-text{display:none}
-    .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:140px;width:auto;max-height:52vh}
+    .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:76px;width:auto;max-height:52vh}
     /* On one column the results and a side panel would stack on top of each other. */
     .panel.behind{display:none}
-    .bottom-bar{left:12px;right:12px;bottom:12px;flex-direction:column;align-items:stretch;gap:8px;padding:9px 10px}
-    /* Wrapping reads as finished; a chip sliced by the edge does not. */
-    .legend{flex-wrap:wrap;overflow:visible}
-    .legend button{flex:1 1 auto;justify-content:space-between}
-    .legend-note{font-size:11px;white-space:normal}
-    .bottom-end{justify-content:space-between}
-    .draw-bar{left:12px;right:12px;bottom:124px;width:auto;transform:none}
-    .leaflet-control-zoom{margin:0 12px 190px 0!important}
+    .info-trigger{right:12px;bottom:12px}
+    .draw-bar{left:12px;right:12px;bottom:70px;width:auto;transform:none}
+    .leaflet-control-zoom{margin:0 12px 76px 0!important}
   }
 
   .lang-short{display:none}
@@ -1368,6 +1364,10 @@ const styles = `
      stretched bar is mostly empty space beside three controls. */
   @media(max-width:560px){
     .topbar{left:12px;right:12px;width:auto;max-width:none;transform:none}
+    .legend-row{flex-direction:column;align-items:stretch;gap:7px}
+    .legend{flex-wrap:wrap;overflow:visible}
+    .legend button{flex:1 1 auto;justify-content:space-between}
+    .legend-note{font-size:11px;white-space:normal}
     .period-wrap{flex:1 1 auto;width:auto;min-width:0}
     .period-control small{display:none}
     .language{padding:0 10px}
