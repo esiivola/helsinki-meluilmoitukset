@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 import {
-  activePresetKey, addDays, categoryCounts, chunkKeysForRange, defaultRange, displayHours,
+  activePresetKey, addDays, byStartDate, categoryCounts, chunkKeysForRange, defaultRange, displayHours,
   describeArea, formatPeriod, formatRange, groupByLocation, isManifestUsable, isoToday, locationKey,
   matchesFilter, mergeNotices, noticeCategory, noticeLabelAt, noticeOverlapsRange, normaliseRange,
   noticeSpan, rangePresets, readJsonCache, unlocatedNotices, writeJsonCache,
@@ -130,6 +130,23 @@ describe('grouping by location', () => {
     expect(groups[0].location.label).toBe('Lönnrotinkatu 37');
   });
 
+  it('orders the notices at one point by when they start', () => {
+    const spot60 = () => spot(60.17, 24.93);
+    const groups = groupByLocation([
+      notice('late', { locations: [spot60()], start: '2026-09-01', end: '2026-09-30' }),
+      notice('early', { locations: [spot60()], start: '2026-08-01', end: '2026-12-31' }),
+      notice('middle', { locations: [spot60()], start: '2026-08-15', end: '2026-08-20' }),
+    ]);
+    expect(groups[0].notices.map((item) => item.id)).toEqual(['early', 'middle', 'late']);
+  });
+
+  it('falls back to the decision date when a notice states no period', () => {
+    expect(byStartDate(
+      { start: null, end: null, decisionDate: '2026-01-01', title: 'a' },
+      { start: '2026-06-01', end: '2026-06-02', title: 'b' },
+    )).toBeLessThan(0);
+  });
+
   it('orders busier locations first', () => {
     const groups = groupByLocation([
       notice('a', { locations: [spot(60.10, 24.90)] }),
@@ -143,6 +160,11 @@ describe('grouping by location', () => {
     const notices = [notice('a', { locations: [spot(60.17, 24.93)] }), notice('b')];
     expect(groupByLocation(notices)).toHaveLength(1);
     expect(unlocatedNotices(notices).map((item) => item.id)).toEqual(['b']);
+    // The list without locations is ordered the same way.
+    expect(unlocatedNotices([
+      notice('later', { start: '2026-09-01' }),
+      notice('sooner', { start: '2026-08-01' }),
+    ]).map((item) => item.id)).toEqual(['sooner', 'later']);
   });
 
   it('keys locations at a stable precision', () => {

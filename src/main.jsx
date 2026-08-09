@@ -169,6 +169,16 @@ export function locationKey(location) {
   return `${location.lat.toFixed(4)}:${location.lon.toFixed(4)}`;
 }
 
+// Earliest first, so a reader looking at a busy corner sees what starts soonest
+// at the top rather than whatever order the chunks happened to load in.
+export function byStartDate(a, b) {
+  const spanA = noticeSpan(a);
+  const spanB = noticeSpan(b);
+  return (spanA?.start || '').localeCompare(spanB?.start || '')
+    || (spanA?.end || '').localeCompare(spanB?.end || '')
+    || (a.title || '').localeCompare(b.title || '');
+}
+
 // One marker per distinct point, carrying every notice that sits there.
 export function groupByLocation(notices) {
   const groups = new Map();
@@ -184,6 +194,7 @@ export function groupByLocation(notices) {
       }
     }
   }
+  for (const group of groups.values()) group.notices.sort(byStartDate);
   return [...groups.values()].sort((a, b) => b.notices.length - a.notices.length);
 }
 
@@ -195,7 +206,7 @@ export function noticeLabelAt(notice, key) {
 }
 
 export function unlocatedNotices(notices) {
-  return notices.filter((notice) => !notice.locations?.length);
+  return notices.filter((notice) => !notice.locations?.length).sort(byStartDate);
 }
 
 export function noticeCategory(notice) {
@@ -1209,9 +1220,9 @@ const styles = `
   .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 18px 104px 0!important}
   .leaflet-control-zoom a{border:0!important;color:#19201c!important;background:#faf9f5!important}
 
-  .topbar{position:absolute;z-index:600;left:50%;top:18px;width:min(880px,calc(100% - 36px));display:flex;align-items:center;gap:12px;padding:9px 10px;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
+  .topbar{position:absolute;z-index:600;left:50%;top:18px;width:max-content;max-width:calc(100% - 36px);display:flex;align-items:center;gap:12px;padding:9px 10px;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
 
-  .period-wrap{position:relative;flex:1;min-width:0;max-width:320px}
+  .period-wrap{position:relative;flex:0 0 auto;width:250px}
   .period-control{width:100%;height:44px;display:flex;align-items:center;gap:10px;padding:0 12px;border:0;border-radius:12px;background:#f0efe9;color:var(--ink);text-align:left;cursor:pointer}
   .period-control>svg:first-child{flex:0 0 auto;color:var(--blue)}
   .period-control>svg:last-child{margin-left:auto;color:var(--muted);transition:transform .18s}
@@ -1336,7 +1347,7 @@ const styles = `
   @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
   @media(max-width:980px){
-    .topbar{left:12px;right:12px;top:12px;width:auto;transform:none}
+    .topbar{top:12px;max-width:calc(100% - 24px);gap:8px}
     .brand-text{display:none}
     .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:140px;width:auto;max-height:52vh}
     /* On one column the results and a side panel would stack on top of each other. */
@@ -1353,7 +1364,11 @@ const styles = `
 
   .lang-short{display:none}
 
+  /* Only at phone width is the bar wide enough to be worth filling; above that a
+     stretched bar is mostly empty space beside three controls. */
   @media(max-width:560px){
+    .topbar{left:12px;right:12px;width:auto;max-width:none;transform:none}
+    .period-wrap{flex:1 1 auto;width:auto;min-width:0}
     .period-control small{display:none}
     .language{padding:0 10px}
     .lang-long{display:none}
