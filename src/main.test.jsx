@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import {
   activePresetKey, addDays, byStartDate, categoryCounts, chunkKeysForRange, defaultRange, displayHours,
   describeArea, formatPeriod, formatRange, groupByLocation, isManifestUsable, isoToday, locationKey,
-  matchesFilter, mergeNotices, noticeCategory, noticeLabelAt, noticeOverlapsRange, normaliseRange,
-  noticeSpan, rangePresets, readJsonCache, unlocatedNotices, writeJsonCache,
+  markerLabel, matchesFilter, mergeNotices, noticeCategory, noticeLabelAt, noticeOverlapsRange,
+  normaliseRange, noticeSpan, rangePresets, readJsonCache, styles, unlocatedNotices, writeJsonCache,
 } from './main.jsx';
 
 const manifest = {
@@ -171,6 +171,26 @@ describe('grouping by location', () => {
     expect(locationKey({ lat: 60.170123, lon: 24.938456 })).toBe('60.1701:24.9385');
   });
 
+  it('names a marker by its place and how many notices it carries', () => {
+    // The marker is a button whose only content is the count, so the name has to
+    // be spelled out or a grouped marker announces itself as "3".
+    const t = { here: 'Tässä kohteessa', noticeCount: 'meluilmoitusta', noticeCountOne: 'meluilmoitus' };
+    const at = (label) => ({ location: spot(60.17, 24.93, { label }), notices: [] });
+
+    const many = at('Malmi');
+    many.notices = [notice('a'), notice('b'), notice('c')];
+    expect(markerLabel(many, t)).toBe('Malmi, 3 meluilmoitusta');
+
+    const one = at('Vilhonvuori');
+    one.notices = [notice('a')];
+    expect(markerLabel(one, t)).toBe('Vilhonvuori, 1 meluilmoitus');
+
+    // A register point can carry no name of its own.
+    const unnamed = at(null);
+    unnamed.notices = [notice('a')];
+    expect(markerLabel(unnamed, t)).toBe('Tässä kohteessa, 1 meluilmoitus');
+  });
+
   it('reports the address a notice itself named at a shared point', () => {
     // Corner buildings carry two street addresses on one register point.
     const corner = notice('a', { locations: [spot(60.163499, 24.928824, { label: 'Lönnrotinkatu 37' })] });
@@ -260,6 +280,37 @@ describe('presentation', () => {
     expect(displayHours([{ kind: 'unknown', from: '09:00', to: '23:00' }]))
       .toEqual([{ kind: 'unknown', from: '09:00', to: '23:00' }]);
     expect(displayHours([])).toEqual([]);
+  });
+});
+
+// The stylesheet is a template string in main.jsx, so the rules that decide
+// whether the period popover is reachable can be asserted directly. jsdom does no
+// layout, so these check the declarations; the geometry was measured in a browser.
+describe('the period popover stays reachable', () => {
+  const ruleFor = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return styles.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`))?.[1] ?? null;
+  };
+
+  it('finds the rules it means to check', () => {
+    expect(ruleFor('.topbar')).toBeTruthy();
+    expect(ruleFor('.period-popover')).toBeTruthy();
+    // .topbar must not be satisfied by .topbar-row.
+    expect(ruleFor('.topbar')).not.toMatch(/padding:9px 10px/);
+  });
+
+  it('does not clip the top bar, because the popover hangs below it', () => {
+    // overflow:hidden here clipped 231 of the popover's 294 pixels away, the apply
+    // button included, and a click where the button should be reached the map.
+    expect(ruleFor('.topbar')).not.toMatch(/overflow\s*:\s*hidden/);
+  });
+
+  it('caps the popover so a short window can scroll it', () => {
+    // html, body and #root are all overflow:hidden, so the page cannot scroll for
+    // it: at 320px tall the apply button ended up off screen and unreachable.
+    const popover = ruleFor('.period-popover');
+    expect(popover).toMatch(/max-height\s*:/);
+    expect(popover).toMatch(/overflow-y\s*:\s*auto/);
   });
 });
 

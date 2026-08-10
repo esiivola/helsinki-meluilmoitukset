@@ -205,6 +205,16 @@ export function noticeLabelAt(notice, key) {
   return match?.label || null;
 }
 
+// Leaflet gives a marker role="button", and a button takes its name from its own
+// content before anything else. A grouped marker's content is the count, so it
+// announced itself as "3" and the place name went unread. The name is spelled out
+// here instead: "Malmi, 3 meluilmoitusta".
+export function markerLabel(group, t) {
+  const count = group.notices.length;
+  const place = group.location.label || t.here;
+  return `${place}, ${count} ${count === 1 ? t.noticeCountOne : t.noticeCount}`;
+}
+
 export function unlocatedNotices(notices) {
   return notices.filter((notice) => !notice.locations?.length).sort(byStartDate);
 }
@@ -239,8 +249,7 @@ export function describeArea(polygon, t) {
 // authority answers it with a "päätös" carrying "määräyksiä".
 const copy = {
   fi: {
-    appName: 'MELU',
-    region: 'Helsinki',
+    pageTitle: 'Helsingin meluilmoituskartta',
     skip: 'Siirry sisältöön',
     mapLabel: 'Kartta meluilmoituksista',
     period: 'Ajanjakso',
@@ -324,8 +333,7 @@ const copy = {
     guardLimit: 'Vahteja voi olla enintään',
   },
   en: {
-    appName: 'MELU',
-    region: 'Helsinki',
+    pageTitle: 'Helsinki noise notification map',
     skip: 'Skip to content',
     mapLabel: 'Map of noise notifications',
     period: 'Period',
@@ -804,7 +812,7 @@ function App() {
     if (!layer) return;
     layer.clearLayers();
     for (const group of groups) {
-      const label = `${group.location.label || ''} (${group.notices.length})`;
+      const label = markerLabel(group, t);
       const marker = L.marker([group.location.lat, group.location.lon], {
         icon: markerIcon(group),
         keyboard: true,
@@ -816,8 +824,21 @@ function App() {
         if (event.originalEvent.key === 'Enter') setSelectedKey(group.key);
       });
       layer.addLayer(marker);
+      // The alt option only reaches image icons, so a divIcon marker has to be
+      // labelled on the element itself.
+      const element = marker.getElement();
+      if (element) {
+        element.setAttribute('aria-label', label);
+        // Leaflet listens for keypress, which Space does not fire.
+        element.addEventListener('keydown', (event) => {
+          if (event.key === ' ') {
+            event.preventDefault();
+            setSelectedKey(group.key);
+          }
+        });
+      }
     }
-  }, [groups]);
+  }, [groups, t]);
 
   useEffect(() => {
     if (selectedKey && !groups.some((group) => group.key === selectedKey)) setSelectedKey(null);
@@ -892,12 +913,10 @@ function App() {
   return (
     <div className="app-shell">
       <a className="skip-link" href="#results">{t.skip}</a>
-      <div
-        ref={mapNode}
-        className={`map${drawing ? ' drawing' : ''}`}
-        role="application"
-        aria-label={t.mapLabel}
-      />
+      {/* The map is given the whole screen, so the page would otherwise carry no
+          heading at all: nothing for a screen reader to orient by and nothing for
+          a crawler that runs the script to read. */}
+      <h1 className="visually-hidden">{t.pageTitle}</h1>
 
       <header className="topbar">
         <div className="topbar-row">
@@ -948,7 +967,9 @@ function App() {
         </div>
       </header>
 
-      <main className={`panel${panel ? ' behind' : ''}`} id="results">
+      {/* tabIndex lets the skip link actually move focus here; without it the
+          browser scrolls the panel into view and leaves focus on the link. */}
+      <main className={`panel${panel ? ' behind' : ''}`} id="results" tabIndex={-1}>
         <p className="visually-hidden" aria-live="polite">
           {status === 'ready' ? `${t.resultSummary} ${total} ${total === 1 ? t.noticeCountOne : t.noticeCount}.` : t.loading}
         </p>
@@ -960,6 +981,15 @@ function App() {
             <button type="button" className="primary" onClick={reload}>
               <RefreshCw size={14} aria-hidden="true" /> {t.retry}
             </button>
+          </div>
+        )}
+
+        {/* Keyed on the period rather than on what is visible: when the filters
+            are what emptied the map, the legend counts already say so. */}
+        {status === 'ready' && inRange.length === 0 && (
+          <div className="card message">
+            <p><strong>{t.empty}</strong></p>
+            <p>{t.emptyHint}</p>
           </div>
         )}
 
@@ -984,7 +1014,7 @@ function App() {
               <X size={18} aria-hidden="true" />
             </button>
             <p className="eyebrow">{t.here}</p>
-            <h1 className="place-title">{selected.location.label || t.here}</h1>
+            <h2 className="place-title">{selected.location.label || t.here}</h2>
             {selected.location.district && selected.location.label !== selected.location.district && (
               <p className="muted">{selected.location.district}</p>
             )}
@@ -1201,14 +1231,34 @@ function App() {
       >
         <Info size={20} aria-hidden="true" />
       </button>
+
+      {/* Last in the DOM on purpose. Every marker is focusable, so with the map
+          first the period control was the 93rd tab stop and the whole top bar sat
+          behind the marker field. Nothing here depends on document order: the map
+          is the only layer at z-index 0 and it fills the shell absolutely, so
+          moving it changes the tab order and nothing else.
+
+          role is region rather than application: application switches a screen
+          reader out of browse mode to hand Leaflet the arrow keys, which buys
+          panning a map you cannot see at the cost of reading and quick-navigating
+          the markers, and the markers are the content. As a labelled region the
+          map is also a landmark, so it can be jumped into or over. */}
+      <div
+        ref={mapNode}
+        className={`map${drawing ? ' drawing' : ''}`}
+        role="region"
+        aria-label={t.mapLabel}
+      />
     </div>
   );
 }
 
-const styles = `
+export const styles = `
   :root{
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;
-    --paper:#fbfaf7;--ink:#19201c;--muted:#5b645e;--line:rgba(25,32,28,.14);
+    /* Muted has to clear the contrast floor on the #f0efe9 tint as well as on
+       paper, because the date label and every card key sit on the tint. */
+    --paper:#fbfaf7;--ink:#19201c;--muted:#545d57;--line:rgba(25,32,28,.14);
     --blue:#1f4fc4;--alert:#a32b1f;
     color:var(--ink);background:#dfe3df;color-scheme:light;font-synthesis:none;
   }
@@ -1225,11 +1275,17 @@ const styles = `
   .map{position:absolute;inset:0;z-index:0}
   .map.drawing{cursor:crosshair}
   .leaflet-container{font-family:inherit;background:#dfe3df}
-  .leaflet-control-attribution{font-size:11px!important;background:rgba(251,250,247,.82)!important;color:#5b645e!important}
+  .leaflet-control-attribution{font-size:11px!important;background:rgba(251,250,247,.82)!important;color:#545d57!important}
+  /* Leaflet ships its own link blue, which reads at 4.6:1 on this background. */
+  .leaflet-control-attribution a{color:var(--blue)!important}
   .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 0 18px 18px!important}
   .leaflet-control-zoom a{border:0!important;color:#19201c!important;background:#faf9f5!important}
 
-  .topbar{position:absolute;z-index:600;left:50%;top:18px;width:max-content;max-width:calc(100% - 36px);display:flex;flex-direction:column;overflow:hidden;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
+  /* No overflow:hidden here. The period popover is a descendant and hangs below
+     the bar, so clipping the bar clipped 79% of the popover away, including the
+     apply button, and clicks in that area reached the map instead. Nothing in the
+     bar paints into the rounded corners, so there is nothing to clip. */
+  .topbar{position:absolute;z-index:600;left:50%;top:18px;width:max-content;max-width:calc(100% - 36px);display:flex;flex-direction:column;background:rgba(251,250,247,.95);border:1px solid rgba(255,255,255,.8);border-radius:16px;box-shadow:0 8px 32px rgba(28,38,32,.12);backdrop-filter:blur(20px);transform:translateX(-50%)}
   .topbar-row{display:flex;align-items:center;gap:12px;padding:9px 10px}
   .topbar-row + .topbar-row{border-top:1px solid var(--line)}
   .legend-row{justify-content:space-between;gap:18px}
@@ -1242,7 +1298,10 @@ const styles = `
   .period-control>span{min-width:0;display:flex;flex-direction:column}
   .period-control small{color:var(--muted);font-size:11px;letter-spacing:.06em;text-transform:uppercase}
   .period-control strong{margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;font-weight:650}
-  .period-popover{position:absolute;z-index:720;top:52px;left:0;width:min(360px,calc(100vw - 24px));padding:16px;border:1px solid rgba(255,255,255,.9);border-radius:16px;background:var(--paper);box-shadow:0 18px 54px rgba(22,31,26,.2)}
+  /* The page itself never scrolls, so on a short window (a phone held sideways)
+     the popover has to scroll inside itself or the apply button ends up off
+     screen with no way to reach it. */
+  .period-popover{position:absolute;z-index:720;top:52px;left:0;width:min(360px,calc(100vw - 24px));max-height:calc(100vh - 92px);overflow-y:auto;padding:16px;border:1px solid rgba(255,255,255,.9);border-radius:16px;background:var(--paper);box-shadow:0 18px 54px rgba(22,31,26,.2)}
   .preset-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
   .preset-grid button{height:44px;border:1px solid var(--line);border-radius:11px;background:var(--paper);color:var(--ink);font-size:13px;cursor:pointer}
   .preset-grid button:hover{background:#f0efe9}
@@ -1265,14 +1324,14 @@ const styles = `
   .panel{position:absolute;z-index:500;left:18px;top:150px;bottom:88px;width:392px;overflow:auto;scrollbar-width:none}
   .panel::-webkit-scrollbar{display:none}
   .card{position:relative;padding:22px;background:var(--paper);border:1px solid rgba(255,255,255,.9);border-radius:18px;box-shadow:0 16px 46px rgba(24,33,28,.16)}
-  .card.message{display:flex;flex-direction:column;gap:12px;color:var(--muted);font-size:14px}
+  .card.message{display:flex;flex-direction:column;gap:10px;color:var(--muted);font-size:14px}
+  .card.message p{margin:0}
+  .card.message strong{display:block;color:var(--ink);font-size:15px}
   .panel-close{position:absolute;right:12px;top:12px}
   .eyebrow{margin:0;color:var(--muted);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
-  .summary h1{margin:0 0 8px;font-size:40px;line-height:1}
-  .summary h1 span{font-size:15px;font-weight:500;letter-spacing:0;color:var(--muted)}
   .place-title{margin:10px 0 4px;font-size:25px}
   .muted{display:flex;align-items:center;gap:7px;margin:6px 0 0;color:var(--muted);font-size:13px;line-height:1.55}
-  .approximate{display:flex;align-items:center;gap:7px;margin:12px 0 0;padding:10px 11px;border-radius:10px;background:#f4eee2;color:#7a5716;font-size:13px}
+  .approximate{display:flex;align-items:center;gap:7px;margin:12px 0 0;padding:10px 11px;border-radius:10px;background:#f4eee2;color:#745214;font-size:13px}
   .unlocated{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
   .unlocated summary{font-size:13px;cursor:pointer}
 
@@ -1335,9 +1394,13 @@ const styles = `
 
   .legend{display:flex;gap:6px;flex:0 0 auto;overflow-x:auto;scrollbar-width:none}
   .legend::-webkit-scrollbar{display:none}
-  .legend button{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);font-size:13px;white-space:nowrap;cursor:pointer;transition:opacity .15s}
+  .legend button{display:inline-flex;align-items:center;gap:8px;flex:0 0 auto;height:34px;padding:0 12px;border:1px solid var(--line);border-radius:10px;background:transparent;color:var(--ink);font-size:13px;white-space:nowrap;cursor:pointer;transition:color .15s,background .15s}
   .legend button:hover{background:#f0efe9}
-  .legend button[aria-pressed=false]{opacity:.42}
+  /* A switched-off filter is signalled by the grey dot and the lighter label,
+     not by fading the whole button: at the .42 opacity this used to carry, the
+     label measured 2.6:1 and its count 1.9:1, and a control that says how many
+     notices it is hiding has to stay readable while it is off. */
+  .legend button[aria-pressed=false]{color:var(--muted);border-style:dashed}
   .legend button[aria-pressed=false] .chip-dot{background:#b7bcb8!important}
   .legend b{color:var(--muted);font-weight:650}
   .legend-note{display:flex;align-items:center;gap:8px;margin:0;color:var(--muted);font-size:12px;white-space:nowrap}
@@ -1347,7 +1410,6 @@ const styles = `
   .info-trigger{position:absolute;z-index:560;right:18px;bottom:18px;width:44px;height:44px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.82);border-radius:50%;background:rgba(251,250,247,.95);color:var(--ink);box-shadow:0 7px 24px rgba(25,34,29,.13);backdrop-filter:blur(16px);cursor:pointer}
   .info-trigger:hover{background:#fff;color:var(--blue)}
   .unlocated.card{padding:14px 18px}
-  .unlocated summary{font-size:13px;cursor:pointer}
 
   .melu-marker{display:grid;place-items:center;width:26px;height:26px;border:2.5px solid var(--paper);border-radius:50%;background:var(--dot);color:#fff;font-size:12px;font-weight:700;box-shadow:0 4px 12px rgba(18,26,22,.3)}
   /* Approximate points read as hollow, so a district centroid is never mistaken
@@ -1358,7 +1420,6 @@ const styles = `
 
   @media(max-width:980px){
     .topbar{top:12px;max-width:calc(100% - 24px);gap:8px}
-    .brand-text{display:none}
     .panel,.overlay.side{left:12px;right:12px;top:auto;bottom:88px;width:auto;max-height:52vh}
     /* On one column the results and a side panel would stack on top of each other. */
     .panel.behind{display:none}
@@ -1366,8 +1427,6 @@ const styles = `
     .draw-bar{left:12px;right:12px;bottom:88px;width:auto;transform:none}
     .leaflet-control-zoom{margin:0 0 12px 12px!important}
   }
-
-  .lang-short{display:none}
 
   /* Only at phone width is the bar wide enough to be worth filling; above that a
      stretched bar is mostly empty space beside three controls. */
@@ -1379,19 +1438,11 @@ const styles = `
     .period-wrap{flex:1 1 auto;width:auto;min-width:0}
     .period-control small{display:none}
     .language{padding:0 10px}
-    .lang-long{display:none}
-    .lang-short{display:inline}
     .icon-button{width:40px;height:40px}
-    .summary h1{font-size:34px}
     /* The period, the watches and the information must stay reachable at this
        width; centring on your own location is the one convenience that can go. */
     .icon-button.locate{display:none}
     .period-control strong{font-size:13px}
-  }
-
-  /* At phone width the date must stay readable, so the decorative mark gives way. */
-  @media(max-width:430px){
-    .brand{display:none}
   }
 `;
 
