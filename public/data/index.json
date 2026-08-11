@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-11T05:30:37.828Z",
-  "totalNotices": 1485,
+  "generatedAt": "2026-08-11T18:30:47.971Z",
+  "totalNotices": 1484,
   "coverage": {
-    "from": "2015-05-19",
+    "from": "1201-07-01",
     "to": "2029-12-31"
   },
   "currentLookbackDays": 30,
@@ -13,8 +13,8 @@
       "file": "notices-current.json",
       "from": "2026-07-12",
       "to": null,
-      "count": 103,
-      "hash": "1f8y1aw"
+      "count": 105,
+      "hash": "tssj3o"
     },
     {
       "key": "2029",
@@ -22,15 +22,15 @@
       "from": "2029-01-01",
       "to": "2029-12-31",
       "count": 3,
-      "hash": "1u3nqsk"
+      "hash": "vqn81p"
     },
     {
       "key": "2028",
       "file": "notices-2028.json",
       "from": "2028-01-01",
       "to": "2028-12-31",
-      "count": 9,
-      "hash": "1s5rajc"
+      "count": 10,
+      "hash": "1lwqyfa"
     },
     {
       "key": "2027",
@@ -38,95 +38,95 @@
       "from": "2027-01-01",
       "to": "2027-12-31",
       "count": 32,
-      "hash": "1f1q3kw"
+      "hash": "1368g4e"
     },
     {
       "key": "2026",
       "file": "notices-2026.json",
       "from": "2026-01-01",
       "to": "2026-12-31",
-      "count": 177,
-      "hash": "vch8v7"
+      "count": 179,
+      "hash": "99fvkj"
     },
     {
       "key": "2025",
       "file": "notices-2025.json",
       "from": "2025-01-01",
       "to": "2025-12-31",
-      "count": 180,
-      "hash": "2qjg8u"
+      "count": 178,
+      "hash": "vzf6b6"
     },
     {
       "key": "2024",
       "file": "notices-2024.json",
       "from": "2024-01-01",
       "to": "2024-12-31",
-      "count": 173,
-      "hash": "bg9p0y"
+      "count": 175,
+      "hash": "z5xrnm"
     },
     {
       "key": "2023",
       "file": "notices-2023.json",
       "from": "2023-01-01",
       "to": "2023-12-31",
-      "count": 178,
-      "hash": "1xe6mcp"
+      "count": 179,
+      "hash": "l40zma"
     },
     {
       "key": "2022",
       "file": "notices-2022.json",
       "from": "2022-01-01",
       "to": "2022-12-31",
-      "count": 226,
-      "hash": "1ohvpzm"
+      "count": 228,
+      "hash": "1xtnle3"
     },
     {
       "key": "2021",
       "file": "notices-2021.json",
       "from": "2021-01-01",
       "to": "2021-12-31",
-      "count": 218,
-      "hash": "1du38w1"
+      "count": 215,
+      "hash": "o96336"
     },
     {
       "key": "2020",
       "file": "notices-2020.json",
       "from": "2020-01-01",
       "to": "2020-12-31",
-      "count": 207,
-      "hash": "qrvkv0"
+      "count": 206,
+      "hash": "txs08r"
     },
     {
       "key": "2019",
       "file": "notices-2019.json",
       "from": "2019-01-01",
       "to": "2019-12-31",
-      "count": 208,
-      "hash": "ryn5q8"
+      "count": 210,
+      "hash": "qh6z7a"
     },
     {
       "key": "2018",
       "file": "notices-2018.json",
       "from": "2018-01-01",
       "to": "2018-12-31",
-      "count": 169,
-      "hash": "iraq4g"
+      "count": 168,
+      "hash": "1376tjh"
     },
     {
       "key": "2017",
       "file": "notices-2017.json",
       "from": "2017-01-01",
       "to": "2017-12-31",
-      "count": 155,
-      "hash": "s8bksa"
+      "count": 153,
+      "hash": "1chty3f"
     },
     {
       "key": "2016",
       "file": "notices-2016.json",
       "from": "2016-01-01",
       "to": "2016-12-31",
-      "count": 3,
-      "hash": "uxyu7g"
+      "count": 4,
+      "hash": "1r6vu9m"
     },
     {
       "key": "2015",
@@ -134,7 +134,95 @@
       "from": "2015-01-01",
       "to": "2015-12-31",
       "count": 2,
-      "hash": "fun617"
+      "hash": "vwb07w"
+    },
+    {
+      "key": "1211",
+      "file": "notices-1211.json",
+      "from": "1211-01-01",
+      "to": "1211-12-31",
+      "count": 1,
+      "hash": "wr4dt4"
+    },
+    {
+      "key": "1210",
+      "file": "notices-1210.json",
+      "from": "1210-01-01",
+      "to": "1210-12-31",
+      "count": 1,
+      "hash": "26as4f"
+    },
+    {
+      "key": "1209",
+      "file": "notices-1209.json",
+      "from": "1209-01-01",
+      "to": "1209-12-31",
+      "count": 1,
+      "hash": "1c79jrt"
+    },
+    {
+      "key": "1208",
+      "file": "notices-1208.json",
+      "from": "1208-01-01",
+      "to": "1208-12-31",
+      "count": 1,
+      "hash": "1tcajh6"
+    },
+    {
+      "key": "1207",
+      "file": "notices-1207.json",
+      "from": "1207-01-01",
+      "to": "1207-12-31",
+      "count": 1,
+      "hash": "1lgzfgn"
+    },
+    {
+      "key": "1206",
+      "file": "notices-1206.json",
+      "from": "1206-01-01",
+      "to": "1206-12-31",
+      "count": 1,
+      "hash": "ige0j4"
+    },
+    {
+      "key": "1205",
+      "file": "notices-1205.json",
+      "from": "1205-01-01",
+      "to": "1205-12-31",
+      "count": 1,
+      "hash": "1lwmjat"
+    },
+    {
+      "key": "1204",
+      "file": "notices-1204.json",
+      "from": "1204-01-01",
+      "to": "1204-12-31",
+      "count": 1,
+      "hash": "69gf06"
+    },
+    {
+      "key": "1203",
+      "file": "notices-1203.json",
+      "from": "1203-01-01",
+      "to": "1203-12-31",
+      "count": 1,
+      "hash": "lsz9gz"
+    },
+    {
+      "key": "1202",
+      "file": "notices-1202.json",
+      "from": "1202-01-01",
+      "to": "1202-12-31",
+      "count": 1,
+      "hash": "1w0071o"
+    },
+    {
+      "key": "1201",
+      "file": "notices-1201.json",
+      "from": "1201-01-01",
+      "to": "1201-12-31",
+      "count": 1,
+      "hash": "h0ybmp"
     }
   ]
 }
