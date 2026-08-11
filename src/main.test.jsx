@@ -343,6 +343,35 @@ describe('the period popover stays reachable', () => {
   });
 });
 
+describe('map marker certainty remains distinct from activity type', () => {
+  const ruleFor = (selector) => {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return styles.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*\\{([^}]*)\\}`))?.[1] ?? null;
+  };
+
+  it('keeps the category colour in the centre of every marker', () => {
+    expect(ruleFor('.melu-marker')).toMatch(/background\s*:\s*var\(--dot\)/);
+    expect(ruleFor('.melu-marker.imprecise')).toMatch(/background\s*:\s*var\(--dot\)/);
+  });
+
+  it('uses a white ring and coloured outer keyline only for approximate locations', () => {
+    const exact = ruleFor('.melu-marker');
+    const approximate = ruleFor('.melu-marker.imprecise');
+
+    expect(exact).toMatch(/border\s*:\s*2\.5px solid var\(--dot\)/);
+    expect(approximate).toMatch(/border\s*:\s*3\.5px solid var\(--paper\)/);
+    expect(approximate).toMatch(/box-shadow\s*:\s*0 0 0 1\.5px var\(--dot\)/);
+  });
+
+  it('shows the same centre-and-ring treatment in the legend', () => {
+    const legend = ruleFor('.chip-dot.hollow');
+    expect(legend).toMatch(/background\s*:\s*var\(--muted\)/);
+    expect(legend).toMatch(/border\s*:\s*2px solid var\(--paper\)/);
+    expect(legend).toMatch(/box-shadow\s*:\s*0 0 0 1px var\(--muted\)/);
+  });
+
+});
+
 describe('cache', () => {
   const fakeStorage = () => {
     const store = new Map();

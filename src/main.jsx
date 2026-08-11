@@ -300,22 +300,22 @@ const copy = {
     retry: 'Yritä uudelleen',
     here: 'Tässä kohteessa',
     tapHint: 'Valitse kohde kartalta.',
-    validity: 'Voimassa',
+    validity: 'Toiminta-aika',
     hours: 'Sallittu työaika',
     nightWork: 'Sisältää yötyötä',
     applicant: 'Ilmoittaja',
     decided: 'Päätös annettu',
     openDecision: 'Avaa päätös',
-    filters: 'Rajaa melun tyypin mukaan',
+    filters: 'Rajaa toiminnan tyypin mukaan',
     customPeriod: 'Oma ajanjakso',
-    approximateLegend: 'Vaalea ympyrä: sijainti on likimääräinen',
+    approximateLegend: 'Valkoinen reunus: sijainti on likimääräinen',
     fromPeriod: 'ajalta',
     editWatch: 'Muokkaa',
     saveChanges: 'Tallenna muutokset',
-    typesHint: 'Jos et valitse yhtään tyyppiä, vahti seuraa niitä kaikkia.',
-    categories: 'Melun tyyppi',
+    typesHint: 'Jos et valitse yhtään toiminnan tyyppiä, vahti seuraa niitä kaikkia.',
+    categories: 'Toiminnan tyyppi',
     construction: 'Rakentaminen',
-    event: 'Yleisötilaisuudet',
+    event: 'Yleisötilaisuus',
     other: 'Muu toiminta',
     approximate: 'Sijainti on likimääräinen.',
     unlocated: 'Ilmoitukset ilman sijaintia',
@@ -323,10 +323,12 @@ const copy = {
     unlocatedBody: 'Näiden päätösten tekstistä ei tunnistettu sijaintia.',
     locate: 'Keskitä kartta sijaintiini',
     info: 'Tietoa palvelusta',
-    infoLead: 'Palvelu kokoaa Helsingin kaupungin meluilmoituspäätökset kartalle.',
-    infoBody: 'Meluilmoitus on ympäristönsuojelulain 118 §:n mukainen ilmoitus tilapäisestä toiminnasta, joka aiheuttaa erityisen häiritsevää melua tai tärinää. Ilmoituksen käsittelee kaupunkiympäristön toimialan ympäristönsuojelu, joka antaa päätöksessä toimintaa koskevat määräykset.',
-    infoAccuracy: 'Ajanjaksot, työajat ja sijainnit on poimittu päätösteksteistä automaattisesti. Ne voivat olla epätarkkoja tai puutteellisia. Alkuperäinen päätös ratkaisee.',
-    infoPrivacy: 'Vahdit ja niiden alueet tallennetaan vain tämän selaimen muistiin. Palvelussa ei ole palvelinta, joka voisi ottaa tietoja vastaan.',
+    infoMaker: 'Sivuston tekijä: Eero Siivola',
+    infoMakerWebsite: 'Sivuston tekijän kotisivut:',
+    infoLead: 'Kartta näyttää Helsingin kaupungin meluilmoituksista antamat päätökset.',
+    infoBody: 'Meluilmoitus koskee tilapäistä toimintaa, joka aiheuttaa erityisen häiritsevää melua tai tärinää. Ilmoitus tehdään ympäristönsuojelulain 118 §:n nojalla. Helsingin kaupungin ympäristöpalvelut käsittelevät ilmoituksen ja antavat päätöksen, jossa määrätään toiminnan ehdoista.',
+    infoAccuracy: 'Ajanjaksot, työajat ja sijainnit poimitaan päätösteksteistä automaattisesti, joten tiedoissa voi olla virheitä tai puutteita. Tarkista tiedot alkuperäisestä päätöksestä.',
+    infoPrivacy: 'Vahdit ja niiden alueet tallennetaan tähän selaimeen. Vahtien tietoja ei lähetetä palvelimelle.',
     sources: 'Lähteet',
     sourceDecisions: 'Helsingin kaupungin päätökset',
     sourceGeo: 'Helsingin kaupungin avoin paikkatieto: osoiteluettelo, nimistö ja aluejako',
@@ -348,8 +350,8 @@ const copy = {
     cancel: 'Peruuta',
     nameWatch: 'Vahdin nimi',
     namePlaceholder: 'Esimerkiksi Koti',
-    typesWatched: 'Seurattavat melun tyypit',
-    allTypes: 'Kaikki tyypit',
+    typesWatched: 'Seurattavat toiminnan tyypit',
+    allTypes: 'Kaikki toiminnan tyypit',
     saveWatch: 'Tallenna vahti',
     dismiss: 'Kuittaa',
     dismissAll: 'Kuittaa kaikki',
@@ -364,7 +366,7 @@ const copy = {
     pageTitle: 'Helsinki noise notification map',
     skip: 'Skip to content',
     mapLabel: 'Map of noise notifications',
-    period: 'Period',
+    period: 'Date range',
     from: 'Starts',
     to: 'Ends',
     presetToday: 'Today',
@@ -382,67 +384,69 @@ const copy = {
     loading: 'Loading noise notifications.',
     loadError: 'The data could not be loaded.',
     retry: 'Try again',
-    here: 'At this site',
-    tapHint: 'Choose a site on the map.',
-    validity: 'Valid',
+    here: 'At this location',
+    tapHint: 'Choose a location on the map.',
+    validity: 'Activity period',
     hours: 'Permitted hours',
     nightWork: 'Includes night work',
-    applicant: 'Notifier',
+    applicant: 'Operator',
     decided: 'Decision issued',
     openDecision: 'Open the decision',
-    filters: 'Filter by type of noise',
-    customPeriod: 'Custom period',
-    approximateLegend: 'Pale circle: the location is approximate',
+    filters: 'Filter by activity type',
+    customPeriod: 'Custom date range',
+    approximateLegend: 'White ring: the location is approximate',
     fromPeriod: 'from',
     editWatch: 'Edit',
     saveChanges: 'Save the changes',
-    typesHint: 'If you choose no types, the watch follows all of them.',
-    categories: 'Type of noise',
+    typesHint: 'If you choose no activity types, the area alert monitors all of them.',
+    categories: 'Activity type',
     construction: 'Construction',
-    event: 'Public events',
+    event: 'Public event',
     other: 'Other activity',
     approximate: 'The location is approximate.',
-    unlocated: 'Notifications without a location',
-    unlocatedCount: 'notifications without a location',
+    unlocated: 'Noise notifications without a location',
+    unlocatedCount: 'noise notifications without a location',
     unlocatedBody: 'No location could be identified in these decision texts.',
     locate: 'Centre the map on my location',
     info: 'About this service',
-    infoLead: 'This service collects the City of Helsinki noise notification decisions onto a map.',
-    infoBody: 'A noise notification is required under section 118 of the Environmental Protection Act for temporary activity that causes particularly disturbing noise or vibration. It is handled by environmental protection within the Urban Environment Division, whose decision sets the conditions for the activity.',
-    infoAccuracy: 'Periods, working hours and locations are extracted from the decision texts automatically. They may be imprecise or incomplete. The original decision always governs.',
-    infoPrivacy: 'Watches and their areas are stored only in this browser. The service has no server that could receive them.',
+    infoMaker: 'Created by Eero Siivola',
+    infoMakerWebsite: 'Creator’s website:',
+    infoLead: 'The map shows decisions issued by the City of Helsinki on noise notifications.',
+    infoBody: 'A noise notification covers temporary activity that causes especially disturbing noise or vibration. It is submitted under section 118 of the Environmental Protection Act. The City of Helsinki’s Environmental Services processes the notification and issues a decision setting the conditions for the activity.',
+    infoAccuracy: 'Periods, working hours and locations are extracted automatically from the decision texts, so the data may contain errors or omissions. Check the original decision before relying on the map.',
+    infoPrivacy: 'Area alerts and their boundaries are stored in this browser. Their data is not sent to a server.',
     sources: 'Sources',
     sourceDecisions: 'City of Helsinki decisions',
-    sourceGeo: 'City of Helsinki open geospatial data: address register, place names and district division',
+    sourceGeo: 'City of Helsinki open geospatial data: address register, place names and district boundaries',
     sourceMap: 'Base map: OpenStreetMap and CARTO',
     updated: 'Data updated',
     disclaimer: 'The data is extracted automatically and may contain errors.',
-    watches: 'Watches',
-    watchesLabel: 'Watches and new notifications',
-    watchCount: 'new notifications',
-    watchCountOne: 'new notification',
-    watchEmpty: 'You have not created any watches yet.',
-    watchEmptyBody: 'A watch follows an area you choose and tells you when a new noise notification appears there. Everything stays in your browser.',
-    addWatch: 'Create a watch',
+    watches: 'Area alerts',
+    watchesLabel: 'Area alerts and new noise notifications',
+    watchCount: 'new noise notifications',
+    watchCountOne: 'new noise notification',
+    watchEmpty: 'You have not created any area alerts yet.',
+    watchEmptyBody: 'An area alert checks your chosen area for new noise notifications. Its data stays in this browser.',
+    addWatch: 'Create an area alert',
     drawArea: 'Draw an area on the map',
     drawHint: 'Tap the corners of the area on the map. At least three corners.',
     drawUseView: 'Use the current map view',
     drawUndo: 'Remove the last corner',
     drawFinish: 'Done',
     cancel: 'Cancel',
-    nameWatch: 'Watch name',
+    nameWatch: 'Area alert name',
     namePlaceholder: 'For example Home',
-    typesWatched: 'Types of noise to follow',
-    allTypes: 'All types',
-    saveWatch: 'Save the watch',
+    typesWatched: 'Activity types to monitor',
+    allTypes: 'All activity types',
+    saveWatch: 'Save the area alert',
     dismiss: 'Clear',
     dismissAll: 'Clear all',
-    dismissAllWatches: 'Clear the notifications of every watch',
-    removeWatch: 'Remove the watch',
-    noNew: 'No new notifications.',
+    dismissAllWatches: 'Clear notifications from all area alerts',
+    removeWatch: 'Remove the area alert',
+    noNew: 'No new noise notifications.',
     corners: 'corners',
     watchArea: 'Area',
-    guardLimit: 'The maximum number of watches is',
+    guardLimit: 'The maximum number of area alerts is',
   },
 };
 
@@ -1163,6 +1167,16 @@ function App() {
 
       {panel === 'info' && (
         <Overlay id="info" title={t.info} onClose={() => setPanel(null)} t={t} className="centre">
+          <div className="info-maker">
+            <p><strong>{t.infoMaker}</strong></p>
+            <p>
+              {t.infoMakerWebsite}
+              {' '}
+              <a href="https://esiivola.github.io/" target="_blank" rel="noreferrer">
+                <strong>esiivola.github.io</strong>
+              </a>
+            </p>
+          </div>
           <p className="lead">{t.infoLead}</p>
           <p>{t.infoBody}</p>
           <p>{t.infoAccuracy}</p>
@@ -1389,6 +1403,10 @@ export const styles = `
   .overlay p{margin:0 0 10px;font-size:14px;line-height:1.6}
   .overlay .lead{font-size:15px;font-weight:650}
   .overlay h3{margin:18px 0 8px;font-size:14px}
+  .info-maker{display:grid;gap:2px;margin:0 0 16px;padding:12px 14px;border-radius:12px;background:#f0efe9}
+  .overlay .info-maker p{margin:0;font-size:13px;line-height:1.55}
+  .info-maker p:last-child{color:var(--muted)}
+  .info-maker a{color:var(--blue);text-underline-offset:2px}
   .source-list{margin:0;padding-left:18px;font-size:13px;line-height:1.7;color:var(--muted)}
   .source-list a{color:var(--blue)}
 
@@ -1435,17 +1453,17 @@ export const styles = `
   .legend button[aria-pressed=false] .chip-dot{background:#b7bcb8!important}
   .legend b{color:var(--muted);font-weight:650}
   .legend-note{display:flex;align-items:center;gap:8px;margin:0;color:var(--muted);font-size:12px;white-space:nowrap}
-  .chip-dot.hollow{background:var(--paper);box-shadow:inset 0 0 0 2px var(--muted)}
+  .chip-dot.hollow{width:12px;height:12px;border:2px solid var(--paper);background:var(--muted);box-shadow:0 0 0 1px var(--muted)}
   .card-note{margin:14px 0 0;padding-top:12px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;line-height:1.5}
   .field-hint{margin:4px 0 8px;color:var(--muted);font-size:12px}
   .info-trigger{position:absolute;z-index:560;right:18px;bottom:18px;width:44px;height:44px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.82);border-radius:50%;background:rgba(251,250,247,.95);color:var(--ink);box-shadow:0 7px 24px rgba(25,34,29,.13);backdrop-filter:blur(16px);cursor:pointer}
   .info-trigger:hover{background:#fff;color:var(--blue)}
   .unlocated.card{padding:14px 18px}
 
-  .melu-marker{display:grid;place-items:center;width:26px;height:26px;border:2.5px solid var(--paper);border-radius:50%;background:var(--dot);color:#fff;font-size:12px;font-weight:700;box-shadow:0 4px 12px rgba(18,26,22,.3)}
-  /* Approximate points read as hollow, so a district centroid is never mistaken
-     for a surveyed address. */
-  .melu-marker.imprecise{border-color:var(--dot);background:var(--paper);color:var(--dot);box-shadow:0 3px 9px rgba(18,26,22,.2)}
+  /* Activity type stays in the dominant coloured centre. Exact points are solid;
+     approximate points add a white border, keeping certainty as a separate cue. */
+  .melu-marker{display:grid;place-items:center;width:26px;height:26px;border:2.5px solid var(--dot);border-radius:50%;background:var(--dot);color:#fff;font-size:12px;font-weight:700;box-shadow:0 0 0 1px var(--paper),0 4px 12px rgba(18,26,22,.3)}
+  .melu-marker.imprecise{border:3.5px solid var(--paper);background:var(--dot);color:#fff;box-shadow:0 0 0 1.5px var(--dot),0 3px 9px rgba(18,26,22,.24)}
 
   @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
