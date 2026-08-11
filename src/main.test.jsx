@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   activePresetKey, addDays, byStartDate, categoryCounts, chunkKeysForRange, defaultRange, displayHours,
-  describeArea, formatPeriod, formatRange, groupByLocation, isManifestUsable, isoToday, locationKey,
+  displaySchedule, describeArea, formatPeriod, formatRange, groupByLocation, isManifestUsable, isoToday, locationKey,
   markerLabel, matchesFilter, mergeNotices, noticeCategory, noticeLabelAt, noticeOverlapsRange,
   normaliseRange, noticeSpan, rangePresets, readJsonCache, styles, unlocatedNotices, writeJsonCache,
 } from './main.jsx';
@@ -67,6 +67,19 @@ describe('period filtering', () => {
     expect(noticeOverlapsRange(notice('b', { start: '2026-01-01', end: '2026-08-09' }), range)).toBe(true);
     expect(noticeOverlapsRange(notice('c', { start: '2026-08-16', end: '2026-08-20' }), range)).toBe(false);
     expect(noticeOverlapsRange(notice('d', { start: '2026-08-01', end: '2026-08-08' }), range)).toBe(false);
+  });
+
+  it('does not fill the quiet gap between disjoint event periods', () => {
+    const event = notice('event', {
+      start: '2023-07-22',
+      end: '2023-08-12',
+      periods: [
+        { start: '2023-07-22', end: '2023-07-23' },
+        { start: '2023-08-11', end: '2023-08-12' },
+      ],
+    });
+    expect(noticeOverlapsRange(event, { from: '2023-07-30', to: '2023-07-30' })).toBe(false);
+    expect(noticeOverlapsRange(event, { from: '2023-08-11', to: '2023-08-11' })).toBe(true);
   });
 
   it('counts categories across the whole window', () => {
@@ -265,6 +278,15 @@ describe('presentation', () => {
     expect(formatPeriod(notice('b', { start: '2026-08-10', end: '2026-09-30' }), 'fi')).toBe('10.8.2026–30.9.2026');
   });
 
+  it('formats disjoint periods without implying continuous activity', () => {
+    expect(formatPeriod(notice('event', {
+      periods: [
+        { start: '2023-07-22', end: '2023-07-23' },
+        { start: '2023-08-11', end: '2023-08-12' },
+      ],
+    }), 'fi')).toBe('22.7.–23.7.2023, 11.8.–12.8.2023');
+  });
+
   it('drops the repeated year from a range within one year', () => {
     expect(formatRange({ from: '2026-08-09', to: '2026-08-15' }, 'fi')).toBe('9.8.\u201315.8.2026');
     expect(formatRange({ from: '2026-12-20', to: '2027-01-10' }, 'fi')).toBe('20.12.2026\u201310.1.2027');
@@ -280,6 +302,13 @@ describe('presentation', () => {
     expect(displayHours([{ kind: 'unknown', from: '09:00', to: '23:00' }]))
       .toEqual([{ kind: 'unknown', from: '09:00', to: '23:00' }]);
     expect(displayHours([])).toEqual([]);
+  });
+
+  it('keeps dates attached to date-specific permitted hours', () => {
+    expect(displaySchedule([
+      { date: '2026-07-29', from: '11:00', to: '22:00', kind: 'allowed' },
+      { date: '2026-07-30', from: '11:00', to: '24:00', kind: 'allowed' },
+    ], 'fi')).toEqual(['29.7.2026 11:00–22:00', '30.7.2026 11:00–24:00']);
   });
 });
 

@@ -73,18 +73,33 @@ export function defaultRange(today = isoToday()) {
   return { from: today, to: addDays(today, DEFAULT_RANGE_DAYS - 1) };
 }
 
-// A notice without a stated period still has a decision date, so it can be placed in time.
-export function noticeSpan(notice) {
+// New records can carry disjoint periods. Older cached chunks retain the single
+// start/end pair, so the fallback keeps the public data change backward compatible.
+export function noticePeriods(notice) {
+  if (Array.isArray(notice?.periods) && notice.periods.length) {
+    return notice.periods
+      .filter((period) => period?.start && period?.end)
+      .map((period) => (period.start <= period.end ? period : { start: period.end, end: period.start }))
+      .sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+  }
   const start = notice.start || notice.decisionDate;
   const end = notice.end || notice.start || notice.decisionDate;
-  if (!start || !end) return null;
-  return start <= end ? { start, end } : { start: end, end: start };
+  if (!start || !end) return [];
+  return [start <= end ? { start, end } : { start: end, end: start }];
+}
+
+// A notice without a stated period still has a decision date, so it can be placed in time.
+export function noticeSpan(notice) {
+  const periods = noticePeriods(notice);
+  if (!periods.length) return null;
+  return {
+    start: periods.reduce((min, period) => (period.start < min ? period.start : min), periods[0].start),
+    end: periods.reduce((max, period) => (period.end > max ? period.end : max), periods[0].end),
+  };
 }
 
 export function noticeOverlapsRange(notice, range) {
-  const span = noticeSpan(notice);
-  if (!span) return false;
-  return span.start <= range.to && span.end >= range.from;
+  return noticePeriods(notice).some((period) => period.start <= range.to && period.end >= range.from);
 }
 
 // Chunks are named by year, plus a "current" slice that is always loaded first.
@@ -148,7 +163,11 @@ export function formatRange(range, locale) {
 }
 
 export function formatPeriod(notice, locale) {
-  const span = noticeSpan(notice);
+  const periods = noticePeriods(notice);
+  if (periods.length > 1) {
+    return periods.map((period) => formatRange({ from: period.start, to: period.end }, locale)).join(', ');
+  }
+  const span = periods[0] || null;
   if (!span) return '';
   if (span.start === span.end) return formatDate(span.start, locale);
   return `${formatDate(span.start, locale)}–${formatDate(span.end, locale)}`;
@@ -163,6 +182,15 @@ export function displayHours(hours) {
   const unknown = hours.filter((window) => window.kind === 'unknown');
   if (unknown.length) return unknown.slice(0, 3);
   return hours.slice(0, 2);
+}
+
+export function displaySchedule(schedule, locale) {
+  if (!Array.isArray(schedule) || !schedule.length) return [];
+  const allowed = schedule.filter((entry) => entry.kind === 'allowed');
+  const selected = allowed.length ? allowed : schedule;
+  return selected.slice(0, 8).map((entry) => (
+    `${formatDate(entry.date, locale)} ${entry.from}–${entry.to}`
+  ));
 }
 
 export function locationKey(location) {
@@ -512,7 +540,8 @@ function markerIcon(group) {
 /* ----------------------------------------------------------- small elements */
 
 function NoticeCard({ notice, t, locale, label, action }) {
-  const hours = displayHours(notice.hours);
+  const schedule = displaySchedule(notice.schedule, locale);
+  const hours = schedule.length ? [] : displayHours(notice.hours);
   return (
     <article className="notice-card">
       <h3>{notice.activity || notice.title}</h3>
@@ -526,10 +555,12 @@ function NoticeCard({ notice, t, locale, label, action }) {
           <dt>{t.validity}</dt>
           <dd>{formatPeriod(notice, locale)}</dd>
         </div>
-        {hours.length > 0 && (
+        {(schedule.length > 0 || hours.length > 0) && (
           <div>
             <dt>{t.hours}</dt>
-            <dd>{hours.map((window) => `${window.from}–${window.to}`).join(', ')}</dd>
+            <dd>{schedule.length
+              ? schedule.join(', ')
+              : hours.map((window) => `${window.from}–${window.to}`).join(', ')}</dd>
           </div>
         )}
         {notice.applicant && (
