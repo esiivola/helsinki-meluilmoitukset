@@ -2,10 +2,11 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   classify, decisionClause, extractDecision, hasNightWork, htmlToText,
-  isPublishable, parseHourWindows, parsePeriod, parseSubject,
+  isPublishable, parseHourWindows, parsePeriod, parsePeriods, parseSubject,
 } from '../scripts/lib/extract.mjs';
 import { areaForms, buildIndex, locateAll, normalize, resolvePartialName, titleCase } from '../scripts/lib/geocode.mjs';
 import { buildChunks, buildManifest, contentHash, coverage, isCurrent, noticeSpan, serialiseChunk, shiftDays, yearsCovered } from '../scripts/lib/publish.mjs';
+import { archiveSeed, EXTRACTION_VERSION, shouldBackfill } from '../scripts/update-noise-data.mjs';
 
 const read = (path) => JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8'));
 const fixtures = read('./fixtures/decisions.json');
@@ -23,6 +24,19 @@ describe('text extraction', () => {
     expect(parsePeriod('purkutyön jatkumista 10.8.−30.9.2026')).toEqual({ start: '2026-08-10', end: '2026-09-30' });
     expect(parsePeriod('kunnossapitotöitä 6.5. - 31.5.2019')).toEqual({ start: '2019-05-06', end: '2019-05-31' });
     expect(parsePeriod('ulkoilmaelokuvaesitystä 25.8.2026')).toEqual({ start: '2026-08-25', end: '2026-08-25' });
+  });
+
+  it('parses abbreviated Finnish ranges and a range crossing New Year', () => {
+    expect(parsePeriod('äänentoistoa 1.7 - 4.7.2026')).toEqual({ start: '2026-07-01', end: '2026-07-04' });
+    expect(parsePeriod('festivaali 24.–26.7.2025')).toEqual({ start: '2025-07-24', end: '2025-07-26' });
+    expect(parsePeriod('työtä 15.12.–15.1.2026')).toEqual({ start: '2025-12-15', end: '2026-01-15' });
+  });
+
+  it('keeps disjoint event periods separate', () => {
+    expect(parsePeriods('konsertteja 22.–23.7. ja 11.–12.8.2023')).toEqual([
+      { start: '2023-07-22', end: '2023-07-23' },
+      { start: '2023-08-11', end: '2023-08-12' },
+    ]);
   });
 
   it('rejects impossible dates rather than rolling them over', () => {
@@ -160,6 +174,30 @@ describe('geocoding', () => {
     expect(spot.lat).toBeGreaterThan(60.17);
   });
 
+  it('resolves unnumbered multi-word register names as complete phrases', () => {
+    const [junction] = locateAll(index, 'ratatyötä Hämeentien ja Kustaa Vaasan tien risteyksessä');
+    expect(junction).toMatchObject({ precision: 'intersection', label: 'Hämeentie / Kustaa Vaasan Tie' });
+
+    const [station] = locateAll(index, 'ratatyötä Helsingin päärautatieaseman ratapihalla');
+    expect(station).toMatchObject({ precision: 'place', label: 'Helsingin Päärautatieasema' });
+
+    const [street] = locateAll(index, 'paalutusta Kaljaasi Fortunan kadulla');
+    expect(street.label).toBe('Kaljaasi Fortunan Katu');
+  });
+
+  it('resolves every stated number in a same-street list or range', () => {
+    const listed = locateAll(index, 'paalutusta osoitteissa John Stenbergin ranta 4 ja 6');
+    expect(listed.map((spot) => spot.label)).toEqual(['John Stenbergin Ranta 4', 'John Stenbergin Ranta 6']);
+
+    const ranged = locateAll(index, 'louhintaa osoitteissa Eliel Saarisen tie 41−45');
+    expect(ranged.map((spot) => spot.label)).toEqual(['Eliel Saarisen Tie 41', 'Eliel Saarisen Tie 45']);
+  });
+
+  it('does not read the next repeated clause as an address letter', () => {
+    const [spot] = locateAll(index, 'piikkausta osoitteessa Töölönkatu 41 \n Töölön ala-asteella');
+    expect(spot.label).toBe('Töölönkatu 41');
+  });
+
   it('returns one location per site when several are named', () => {
     const spots = locateAll(index, 'ulkoilmaelokuvaesityksiä Karhupuistossa ja Kansalaistorilla');
     expect(spots.length).toBeGreaterThan(1);
@@ -218,6 +256,35 @@ describe('end-to-end extraction over real decisions', () => {
 
     const [spot] = locateAll(index, record.locationText);
     expect(spot).toMatchObject({ precision: 'address', label: 'Länsisatamankuja 1', district: 'Jätkäsaari' });
+  });
+
+  it('prefers binding dated conditions over a stale date in the application section', () => {
+    const record = extractDecision(bySubject('Bubble Entertainment'));
+    expect(record).toMatchObject({
+      start: '2026-07-29',
+      end: '2026-08-02',
+      periodConfidence: 'high',
+    });
+    expect(record.schedule).toEqual([
+      { date: '2026-07-29', from: '11:00', to: '22:00', kind: 'allowed' },
+      { date: '2026-07-30', from: '11:00', to: '24:00', kind: 'allowed' },
+      { date: '2026-07-31', from: '11:00', to: '22:00', kind: 'allowed' },
+      { date: '2026-08-01', from: '11:00', to: '24:00', kind: 'allowed' },
+      { date: '2026-08-02', from: '11:00', to: '22:00', kind: 'allowed' },
+    ]);
+    expect(record.hours).toEqual([
+      { kind: 'allowed', from: '11:00', to: '22:00' },
+      { kind: 'allowed', from: '11:00', to: '24:00' },
+    ]);
+  });
+
+  it('keeps application start times attached when binding conditions only set daily end times', () => {
+    const record = extractDecision(bySubject('Slush The Borough'));
+    expect(record.periods).toEqual([{ start: '2019-11-21', end: '2019-11-22' }]);
+    expect(record.schedule).toEqual([
+      { date: '2019-11-21', from: '18:00', to: '22:00', kind: 'unknown' },
+      { date: '2019-11-22', from: '20:00', to: '24:00', kind: 'unknown' },
+    ]);
   });
 
   it('dates and locates nearly every decision', () => {
@@ -313,5 +380,32 @@ describe('chunking for lazy loading', () => {
     const [chunk] = buildChunks([{ ...notices[0], text: 'long body', clause: 'clause' }], '2026-08-09');
     expect(chunk.records[0]).not.toHaveProperty('text');
     expect(chunk.records[0]).not.toHaveProperty('clause');
+  });
+
+  it('publishes exact periods and date-specific schedules additively', () => {
+    const [chunk] = buildChunks([{
+      ...notices[1],
+      periods: [{ start: '2026-08-25', end: '2026-08-25' }],
+      schedule: [{ date: '2026-08-25', from: '19:00', to: '23:00', kind: 'allowed' }],
+    }], '2026-08-09');
+    expect(chunk.records[0]).toMatchObject({
+      periods: [{ start: '2026-08-25', end: '2026-08-25' }],
+      schedule: [{ date: '2026-08-25', from: '19:00', to: '23:00', kind: 'allowed' }],
+    });
+  });
+});
+
+describe('collector workflow', () => {
+  it('forces a backfill when the extraction version changes', () => {
+    expect(shouldBackfill({ extractionVersion: EXTRACTION_VERSION }, false)).toBe(false);
+    expect(shouldBackfill({ extractionVersion: EXTRACTION_VERSION - 1 }, false)).toBe(true);
+    expect(shouldBackfill({ notices: [] }, false)).toBe(true);
+    expect(shouldBackfill({ extractionVersion: EXTRACTION_VERSION }, true)).toBe(true);
+  });
+
+  it('rebuilds a backfill from scratch so stale archive entries cannot survive', () => {
+    const archive = { notices: [{ id: 'old' }] };
+    expect(archiveSeed(archive, true)).toEqual([]);
+    expect(archiveSeed(archive, false)).toEqual([{ id: 'old' }]);
   });
 });

@@ -123,7 +123,9 @@ export function buildIndex(gazetteer) {
   }
   const placeForms = new Map();
   for (const name of places.keys()) {
-    if (districts.has(name) || streets.has(name)) continue;
+    // Very short register names such as "Vanha" are ordinary Finnish words and
+    // create false locations in phrases such as "Vanhan talvitien".
+    if (name.length < 6 || districts.has(name) || streets.has(name)) continue;
     for (const form of inflect(name)) if (!placeForms.has(form)) placeForms.set(form, name);
   }
   const districtForms = new Map();
@@ -132,7 +134,20 @@ export function buildIndex(gazetteer) {
     // (Aurinkolahti -> Aurinkolahden), which plain case endings would miss.
     for (const form of inflect(name)) if (!districtForms.has(form)) districtForms.set(form, name);
   }
-  return { streets, places, districts, streetForms, placeForms, districtForms };
+  const phrases = (forms) => [...forms.entries()]
+    .filter(([form]) => form.includes(' '))
+    .sort((a, b) => b[0].length - a[0].length);
+  return {
+    streets,
+    places,
+    districts,
+    streetForms,
+    placeForms,
+    districtForms,
+    streetPhrases: phrases(streetForms),
+    placePhrases: phrases(placeForms),
+    districtPhrases: phrases(districtForms),
+  };
 }
 
 // One representative point for a registered name, whatever register it came from.
@@ -217,24 +232,58 @@ export function titleCase(value) {
 }
 
 const WORD_RE = /[A-Za-zÅÄÖåäö][\wÅÄÖåäö-]{4,}/g;
-// Street names run from one token to three ("Antti Korpin tie", "John Stenbergin ranta").
-const NUMBERED_RE = /([A-ZÅÄÖ][\wåäö-]+(?:\s+[A-Za-zÅÄÖåäö][\wåäö-]+){0,2})\s+(\d{1,4})\s*([a-zA-Z])?(?![\w.])/g;
+const DASH = '[-\\u2010\\u2011\\u2012\\u2013\\u2014\\u2212]';
+const SPACE = '[\\s\\u00a0]';
+// Five tokens covers the longest current street name ("Mischan ja Maschan aukio")
+// while candidates are still accepted only when the complete tail is registered.
+const NUMBERED_RE = /([A-ZÅÄÖ][\p{L}\p{N}.´'-]*(?:[ \t]+[A-Za-zÅÄÖåäö][\p{L}\p{N}.´'-]*){0,4})[ \t]+(\d{1,4})(?:([a-zA-Z])|[ \t]+([a-zA-Z])(?=$|[,\s/()\u2010-\u2015\u2212-]))?(?![\p{L}\p{N}.])/gu;
+const LISTED_NUMBER_RE = new RegExp(
+  `^${SPACE}*(?:,|ja|sek[aä]|/|${DASH})${SPACE}*(\\d{1,4})(?:([a-zA-Z])|[ \\t]+([a-zA-Z])(?=$|[,\\s/()\\u2010-\\u2015\\u2212-]))?(?![\\p{L}\\p{N}.])`,
+  'iu',
+);
+const WORD_CHAR = /[\p{L}\p{N}]/u;
 
-function mentionedNames(text, forms, minLength = 5) {
-  const found = [];
-  const consider = (word) => {
+function mentionedNames(text, forms, minLength = 5, phrases = []) {
+  const positions = new Map();
+  const haystack = normalize(text);
+  const covered = [];
+  const remember = (base, at) => {
+    if (!positions.has(base) || at < positions.get(base)) positions.set(base, at);
+  };
+  const consider = (word, at) => {
     if (word.length < minLength) return;
     const base = forms.get(word);
-    if (base && !found.includes(base)) found.push(base);
+    if (base) remember(base, at);
   };
-  for (const match of normalize(text).matchAll(WORD_RE)) {
+
+  // Match complete registered phrases first. This both finds names such as
+  // "Kustaa Vaasan tie" and prevents an inner token such as "Fortuna" from
+  // winning over "Kaljaasi Fortunan katu".
+  for (const [form, base] of phrases) {
+    let offset = 0;
+    while (offset < haystack.length) {
+      const at = haystack.indexOf(form, offset);
+      if (at < 0) break;
+      const end = at + form.length;
+      const bounded = (at === 0 || !WORD_CHAR.test(haystack[at - 1]))
+        && (end === haystack.length || !WORD_CHAR.test(haystack[end]));
+      if (bounded && !covered.some(([from, to]) => at < to && end > from)) {
+        covered.push([at, end]);
+        remember(base, at);
+      }
+      offset = at + 1;
+    }
+  }
+
+  for (const match of haystack.matchAll(WORD_RE)) {
+    if (covered.some(([from, to]) => match.index < to && match.index + match[0].length > from)) continue;
     const word = match[0];
-    consider(word);
+    consider(word, match.index);
     // "Mannerheimintie-Kaivokatu risteysalue" joins two street names with a hyphen,
     // while hyphens are also internal to single names (Taka-Töölö), so try both.
-    if (word.includes('-')) word.split('-').forEach(consider);
+    if (word.includes('-')) word.split('-').forEach((part) => consider(part, match.index));
   }
-  return found;
+  return [...positions.entries()].sort((a, b) => a[1] - b[1]).map(([base]) => base);
 }
 
 function resolveNumber(points, number, letter) {
@@ -262,14 +311,24 @@ function findAddresses(index, text) {
     for (const candidate of candidates) {
       const points = index.streets.get(normalize(candidate));
       if (!points) continue;
-      const resolved = resolveNumber(points, Number(match[2]), match[3]);
-      if (!resolved) continue;
-      found.push({
-        lat: round(resolved.point[2]),
-        lon: round(resolved.point[3]),
-        precision: resolved.precision,
-        label: `${titleCase(normalize(candidate))} ${match[2]}${match[3] || ''}`,
-      });
+      const numbers = [{ number: Number(match[2]), raw: match[2], letter: match[3] || match[4] || '' }];
+      let tail = text.slice(match.index + match[0].length);
+      while (tail) {
+        const next = tail.match(LISTED_NUMBER_RE);
+        if (!next) break;
+        numbers.push({ number: Number(next[1]), raw: next[1], letter: next[2] || next[3] || '' });
+        tail = tail.slice(next[0].length);
+      }
+      for (const entry of numbers) {
+        const resolved = resolveNumber(points, entry.number, entry.letter);
+        if (!resolved) continue;
+        found.push({
+          lat: round(resolved.point[2]),
+          lon: round(resolved.point[3]),
+          precision: resolved.precision,
+          label: `${titleCase(normalize(candidate))} ${entry.raw}${entry.letter}`,
+        });
+      }
       break;
     }
   }
@@ -314,7 +373,7 @@ function dedupe(locations) {
  */
 export function locateAll(index, text) {
   if (!text) return [];
-  const districtNames = mentionedNames(text, index.districtForms);
+  const districtNames = mentionedNames(text, index.districtForms, 5, index.districtPhrases);
   const district = districtNames[0] || null;
   const anchor = district ? index.districts.get(district) : null;
   const withDistrict = (locations) => locations.map((location) => ({
@@ -325,8 +384,11 @@ export function locateAll(index, text) {
   const addresses = findAddresses(index, text);
   if (addresses.length) return withDistrict(dedupe(addresses));
 
-  const streetNames = mentionedNames(text, index.streetForms, 6);
-  const placeNames = mentionedNames(text, index.placeForms, 6);
+  // A name present in both registers is overwhelmingly used as a district when
+  // it has no number. Numbered streets have already been resolved above.
+  const streetNames = mentionedNames(text, index.streetForms, 6, index.streetPhrases)
+    .filter((name) => !index.districts.has(name));
+  const placeNames = mentionedNames(text, index.placeForms, 6, index.placePhrases);
 
   if (streetNames.length === 2 && !placeNames.length && JUNCTION_CUES.test(text)) {
     const spot = junction(index.streets.get(streetNames[0]), index.streets.get(streetNames[1]));

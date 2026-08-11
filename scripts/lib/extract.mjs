@@ -36,7 +36,7 @@ export function htmlToText(html) {
 
 // The operative sentence: "...ilmoituksen, joka koskee <activity> <period> osoitteessa <place>, ..."
 export function decisionClause(text) {
-  const match = text.match(/joka koskee ([\s\S]{0,500}?)(?:,?\s*ilmoituksessa esitetyll|\s*sek[aä] seuraavin m[aä][aä]r[aä]yksin|\.\s)/i);
+  const match = text.match(/joka koskee ([\s\S]{0,500}?)(?:,?\s*ilmoituksessa esitetyll|\s*sek[aä] seuraavin m[aä][aä]r[aä]yksin|\.\s+(?=[A-ZÅÄÖ]))/i);
   return match ? match[1].trim() : null;
 }
 
@@ -45,6 +45,27 @@ export function section(text, heading) {
   const start = text.indexOf(heading);
   if (start < 0) return null;
   return text.slice(start + heading.length, start + heading.length + 1200).trim();
+}
+
+// Keep the binding decision conditions separate from the applicant's description.
+// They can disagree after an application has been corrected, and only the former
+// state what the authority actually allowed.
+function boundedSection(text, heading, endHeadings, maxLength = 6000) {
+  const start = text.indexOf(heading);
+  if (start < 0) return null;
+  const bodyStart = start + heading.length;
+  let end = Math.min(text.length, bodyStart + maxLength);
+  for (const candidate of endHeadings) {
+    const at = text.indexOf(candidate, bodyStart);
+    if (at >= 0 && at < end) end = at;
+  }
+  return text.slice(bodyStart, end).trim();
+}
+
+function decisionBody(text) {
+  return boundedSection(text, 'Päätös', [
+    'Käsittelymaksu', 'Päätöksen perustelut', 'Ilmoituksen tekijä', 'Ilmoituksen sisältö',
+  ]);
 }
 
 function toIso(day, month, year) {
@@ -57,41 +78,117 @@ function toIso(day, month, year) {
   return date.toISOString().slice(0, 10);
 }
 
+// The left side is often abbreviated: "24.–26.7.2025" (same month),
+// "1.7 - 4.7.2026" (missing the month-ending dot), or "6.5. - 31.5.2019".
 const RANGE_RE = new RegExp(
-  `(\\d{1,2})\\.${SPACE}*(\\d{1,2})\\.${SPACE}*(\\d{4})?${SPACE}*${DASH}${SPACE}*(\\d{1,2})\\.${SPACE}*(\\d{1,2})\\.${SPACE}*(\\d{4})`,
+  `(\\d{1,2})\\.(?:(\\d{1,2})(?:\\.(\\d{4})?)?)?${SPACE}*${DASH}${SPACE}*`
+  + `(\\d{1,2})\\.${SPACE}*(\\d{1,2})(?:\\.${SPACE}*(\\d{4}))?`,
+  'g',
 );
 const SINGLE_RE = /(\d{1,2})\.[\s ]*(\d{1,2})\.[\s ]*(\d{4})/;
 
+function nearbyYear(text, match) {
+  if (match[6]) return Number(match[6]);
+  const nearby = text.slice(match.index, match.index + match[0].length + 100);
+  const years = [...nearby.matchAll(/\b(?:19|20)\d{2}\b/g)];
+  return years.length ? Number(years[years.length - 1][0]) : null;
+}
+
+function sortPeriods(periods) {
+  return periods.sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end));
+}
+
+export function parsePeriods(text) {
+  if (!text) return [];
+  const ranges = [];
+  for (const match of text.matchAll(RANGE_RE)) {
+    const [, d1, statedM1, statedY1, d2, m2, statedY2] = match;
+    const endYear = Number(statedY2) || nearbyYear(text, match);
+    if (!endYear) continue;
+    const startMonth = Number(statedM1 || m2);
+    const endMonth = Number(m2);
+    let startYear = Number(statedY1) || endYear;
+    // A year written only at the end of "15.12.–15.1.2026" applies to the
+    // January endpoint; the December endpoint belongs to the previous year.
+    if (!statedY1 && startMonth > endMonth) startYear -= 1;
+    const start = toIso(d1, startMonth, startYear);
+    const end = toIso(d2, endMonth, endYear);
+    if (!start || !end) continue;
+    ranges.push(start <= end ? { start, end } : { start: end, end: start });
+  }
+  if (ranges.length) return sortPeriods(ranges);
+
+  const single = text.match(SINGLE_RE);
+  if (!single) return [];
+  const iso = toIso(single[1], single[2], single[3]);
+  return iso ? [{ start: iso, end: iso }] : [];
+}
+
+function envelope(periods) {
+  if (!periods.length) return null;
+  return {
+    start: periods.reduce((min, period) => (period.start < min ? period.start : min), periods[0].start),
+    end: periods.reduce((max, period) => (period.end > max ? period.end : max), periods[0].end),
+  };
+}
+
 // "10.8.2026 - 31.5.2028", "6.5. - 31.5.2019", "10.8.−30.9.2026", or a single date.
 export function parsePeriod(text) {
-  if (!text) return null;
-  const range = text.match(RANGE_RE);
-  if (range) {
-    const [, d1, m1, y1, d2, m2, y2] = range;
-    const start = toIso(d1, m1, y1 || y2);
-    const end = toIso(d2, m2, y2);
-    if (start && end && start <= end) return { start, end };
-    if (start && end) return { start: end, end: start };
+  return envelope(parsePeriods(text));
+}
+
+function nextDay(iso) {
+  const date = new Date(`${iso}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function mergeDatesToPeriods(dates) {
+  const sorted = [...new Set(dates)].sort();
+  const periods = [];
+  for (const date of sorted) {
+    const last = periods[periods.length - 1];
+    if (last && nextDay(last.end) === date) last.end = date;
+    else periods.push({ start: date, end: date });
   }
-  const single = text.match(SINGLE_RE);
-  if (single) {
-    const iso = toIso(single[1], single[2], single[3]);
-    if (iso) return { start: iso, end: iso };
+  return periods;
+}
+
+function datedDecisionOccurrences(text) {
+  if (!text) return [];
+  const dates = [];
+  const scanner = new RegExp(SINGLE_RE.source, 'g');
+  for (const match of text.matchAll(scanner)) {
+    // Binding event conditions commonly give one full date per weekday and put
+    // the permitted ending time later in the same phrase.
+    if (!/\bkello\b/i.test(text.slice(match.index, match.index + match[0].length + 90))) continue;
+    const date = toIso(match[1], match[2], match[3]);
+    if (date) dates.push(date);
   }
-  return null;
+  return dates;
 }
 
 // Tries the operative clause first, then the notice-content section, then the head of
 // the document. Anything found outside the clause is reported as lower confidence.
-export function resolvePeriod(text, clause) {
-  const fromClause = parsePeriod(clause);
-  if (fromClause) return { ...fromClause, confidence: 'high' };
-  for (const heading of ['Ilmoituksen sisältö', 'Ilmoitus koskee', 'Päätös']) {
-    const found = parsePeriod(section(text, heading));
-    if (found) return { ...found, confidence: 'medium' };
+export function resolvePeriod(text, clause, schedule = []) {
+  const clausePeriods = parsePeriods(clause);
+  if (clausePeriods.length) return { ...envelope(clausePeriods), periods: clausePeriods, confidence: 'high' };
+  if (schedule.length) {
+    const periods = mergeDatesToPeriods(schedule.map((entry) => entry.date));
+    return { ...envelope(periods), periods, confidence: 'high' };
   }
-  const head = parsePeriod(text.slice(0, 2000));
-  return head ? { ...head, confidence: 'low' } : null;
+  const bindingText = decisionBody(text);
+  const occurrences = datedDecisionOccurrences(bindingText);
+  if (occurrences.length > 1) {
+    const periods = mergeDatesToPeriods(occurrences);
+    return { ...envelope(periods), periods, confidence: 'high' };
+  }
+  for (const [heading, confidence] of [['Päätös', 'medium'], ['Ilmoituksen sisältö', 'medium'], ['Ilmoitus koskee', 'medium']]) {
+    const periods = parsePeriods(heading === 'Päätös' ? bindingText : section(text, heading));
+    if (periods.length) return { ...envelope(periods), periods, confidence };
+  }
+  const periods = parsePeriods(text.slice(0, 2000));
+  return periods.length ? { ...envelope(periods), periods, confidence: 'low' } : null;
 }
 
 const HOURS_RE = new RegExp(
@@ -102,7 +199,10 @@ const PROHIBITED = /kielletty|kiellettyj[aä]|ei saa|v[aä]ltett[aä]v[aä]|vain
 const ALLOWED = /sallittu|sallittuja|saa tehd[aä]|saa k[aä]ytt[aä][aä]|saa suorittaa|tehd[aä][aä]n/i;
 
 function clock(hour, minute) {
-  return `${String(Number(hour)).padStart(2, '0')}:${minute}`;
+  const h = Number(hour);
+  const m = Number(minute);
+  if (h < 0 || h > 24 || m < 0 || m > 59 || (h === 24 && m !== 0)) return null;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 function lastMatchIndex(text, pattern) {
@@ -128,12 +228,65 @@ export function parseHourWindows(text) {
     const kind = ban < 0 && permit < 0 ? 'unknown' : (permit > ban ? 'allowed' : 'prohibited');
     const from = clock(match[1], match[2]);
     const to = clock(match[3], match[4]);
+    if (!from || !to) continue;
     const key = `${kind}:${from}:${to}`;
     if (seen.has(key)) continue;
     seen.add(key);
     windows.push({ kind, from, to });
   }
   return windows;
+}
+
+const DATED_HOURS_RE = new RegExp(
+  `(\\d{1,2})\\.${SPACE}*(\\d{1,2})\\.${SPACE}*(\\d{4})${SPACE}+kello${SPACE}+`
+  + `(\\d{1,2})[.:](\\d{2})${SPACE}*${DASH}${SPACE}*(\\d{1,2})[.:](\\d{2})`,
+  'gi',
+);
+
+export function parseSchedule(text, defaultKind = 'unknown') {
+  if (!text) return [];
+  const schedule = [];
+  const seen = new Set();
+  for (const match of text.matchAll(DATED_HOURS_RE)) {
+    const date = toIso(match[1], match[2], match[3]);
+    const from = clock(match[4], match[5]);
+    const to = clock(match[6], match[7]);
+    if (!date || !from || !to) continue;
+    const context = text.slice(Math.max(0, match.index - 260), match.index);
+    const ban = lastMatchIndex(context, PROHIBITED);
+    const permit = lastMatchIndex(context, ALLOWED);
+    const kind = ban < 0 && permit < 0 ? defaultKind : (permit > ban ? 'allowed' : 'prohibited');
+    const key = `${date}:${kind}:${from}:${to}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    schedule.push({ date, from, to, kind });
+  }
+  return schedule.sort((a, b) => a.date.localeCompare(b.date) || a.from.localeCompare(b.from));
+}
+
+function uniqueWindows(windows) {
+  const seen = new Set();
+  return windows.filter((window) => {
+    const key = `${window.kind}:${window.from}:${window.to}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function resolveHours(text, bindingText, schedule) {
+  if (schedule.length) {
+    return uniqueWindows(schedule.map(({ kind, from, to }) => ({ kind, from, to })));
+  }
+  const binding = parseHourWindows(bindingText || '');
+  if (binding.some((window) => window.kind !== 'prohibited')) return binding;
+
+  // When the authority accepts an application as submitted and gives no
+  // replacement hours, the application's stated hours remain useful. Limit the
+  // fallback to that section rather than returning to a whole-document scan.
+  const application = parseHourWindows(section(text, 'Ilmoituksen sisältö'))
+    .filter((window) => window.kind !== 'prohibited');
+  return uniqueWindows([...binding, ...application]);
 }
 
 // Judged from the subject and operative clause only. Nearly every decision bans
@@ -247,7 +400,13 @@ export function extractDecision(source) {
   const html = first(source.decision_content) || '';
   const text = htmlToText(html);
   const clause = decisionClause(text);
-  const period = resolvePeriod(text, clause);
+  const bindingText = decisionBody(text);
+  const bindingSchedule = parseSchedule(bindingText, 'allowed');
+  const applicationSchedule = bindingSchedule.length
+    ? []
+    : parseSchedule(section(text, 'Ilmoituksen sisältö'), 'unknown');
+  const schedule = bindingSchedule.length ? bindingSchedule : applicationSchedule;
+  const period = resolvePeriod(text, clause, bindingSchedule);
   const { applicant, activity } = parseSubject(subject);
   // Non-standard subjects carry no activity part. The subject is a better fallback
   // than the operative clause, which runs on into the standard conditions.
@@ -278,8 +437,10 @@ export function extractDecision(source) {
     decisionDate,
     start: period?.start || null,
     end: period?.end || null,
+    periods: period?.periods || [],
     periodConfidence: period?.confidence || null,
-    hours: parseHourWindows(text),
+    schedule,
+    hours: resolveHours(text, bindingText, schedule),
     nightWork: hasNightWork([subject, clause].filter(Boolean).join(' ')),
     authority: org || null,
     clause,

@@ -6,6 +6,7 @@
 //   node scripts/update-noise-data.mjs --backfill  re-read the whole archive
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { fetchJson } from './lib/fetch-json.mjs';
 import { extractDecision, isPublishable } from './lib/extract.mjs';
 import { buildIndex, locateAll } from './lib/geocode.mjs';
@@ -15,6 +16,11 @@ const ELASTIC = 'https://paatokset-elastic-proxy.api.hel.ninja/paatokset_decisio
 const CATEGORY = 'Meluilmoitus';
 const PAGE_SIZE = 250;
 const INCREMENTAL_PAGES = 2;
+
+// Bump this whenever existing source documents need to be re-extracted. A script
+// push then performs one full backfill automatically instead of leaving old
+// records on the previous parser until someone remembers workflow_dispatch.
+export const EXTRACTION_VERSION = 2;
 
 const ARCHIVE = new URL('../data/decisions.json', import.meta.url);
 const GAZETTEER = new URL('../data/gazetteer.json', import.meta.url);
@@ -72,11 +78,25 @@ async function fetchDecisions({ backfill }) {
 async function readArchive() {
   try {
     const parsed = JSON.parse(await readFile(ARCHIVE, 'utf8'));
-    return Array.isArray(parsed.notices) ? parsed.notices : [];
+    return {
+      extractionVersion: parsed.extractionVersion || null,
+      notices: Array.isArray(parsed.notices) ? parsed.notices : [],
+    };
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
-    return [];
+    return { extractionVersion: null, notices: [] };
   }
+}
+
+export function shouldBackfill(archive, requested) {
+  return Boolean(requested) || archive?.extractionVersion !== EXTRACTION_VERSION;
+}
+
+// A backfill is a clean reconstruction, not an incremental merge. Starting from
+// the old archive would preserve a stale record if it disappeared from the source
+// index or the current parser deliberately stopped publishing it.
+export function archiveSeed(archive, backfill) {
+  return backfill ? [] : (archive?.notices || []);
 }
 
 function toNotice(source, index) {
@@ -92,12 +112,13 @@ const byDateDescending = (a, b) => (b.decisionDate || '').localeCompare(a.decisi
   || (a.id || '').localeCompare(b.id || '');
 
 async function main() {
-  const backfill = process.argv.includes('--backfill');
+  const archive = await readArchive();
+  const backfill = shouldBackfill(archive, process.argv.includes('--backfill'));
   const gazetteer = JSON.parse(await readFile(GAZETTEER, 'utf8'));
   const index = buildIndex(gazetteer);
 
   const { documents, total } = await fetchDecisions({ backfill });
-  const merged = new Map((await readArchive()).map((notice) => [notice.id, notice]));
+  const merged = new Map(archiveSeed(archive, backfill).map((notice) => [notice.id, notice]));
   let added = 0;
   for (const source of documents) {
     const notice = toNotice(source, index);
@@ -118,7 +139,12 @@ async function main() {
   // between runs unless its content actually changed, so the daily commit is a
   // couple of kilobytes rather than a full rewrite of the archive.
   await mkdir(new URL('.', ARCHIVE), { recursive: true });
-  await writeFile(ARCHIVE, `${JSON.stringify({ schemaVersion: 1, sourceTotal: total, notices })}\n`, 'utf8');
+  await writeFile(ARCHIVE, `${JSON.stringify({
+    schemaVersion: 1,
+    extractionVersion: EXTRACTION_VERSION,
+    sourceTotal: total,
+    notices,
+  })}\n`, 'utf8');
 
   const chunks = buildChunks(notices, today);
   await mkdir(PUBLIC_DIR, { recursive: true });
@@ -133,6 +159,7 @@ async function main() {
 
   console.log([
     `source total ${total}`,
+    backfill ? `extraction v${EXTRACTION_VERSION} backfill` : `extraction v${EXTRACTION_VERSION} incremental`,
     `fetched ${documents.length}`,
     `new ${added}`,
     `archive ${notices.length}`,
@@ -142,4 +169,4 @@ async function main() {
   ].join(' · '));
 }
 
-await main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await main();

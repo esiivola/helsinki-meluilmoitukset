@@ -55,6 +55,8 @@ export function publicRecord(notice) {
     decisionDate: notice.decisionDate,
     start: notice.start,
     end: notice.end,
+    periods: notice.periods,
+    schedule: notice.schedule,
     hours: notice.hours,
     nightWork: notice.nightWork,
     locations: notice.locations,

@@ -38,6 +38,15 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Extraction regressions must fail before generated archive data can be
+      # committed by the bot. Deployment tests would otherwise run too late.
+      - name: Run extraction tests
+        run: npm test -- --run test/pipeline.test.mjs
 
       - name: Collect decisions
         run: node scripts/update-noise-data.mjs ${{ inputs.backfill && '--backfill' || '' }}
