@@ -311,6 +311,9 @@ const copy = {
     approximateLegend: 'Valkoinen reunus: sijainti on likimääräinen',
     fromPeriod: 'ajalta',
     editWatch: 'Muokkaa',
+    editWatchArea: 'Muokkaa aluetta',
+    editWatchAreaHint: 'Lisää kulmia napauttamalla karttaa tai siirrä niitä vetämällä. Vähintään kolme kulmaa.',
+    editWatchCorner: 'Alueen kulmapiste',
     saveChanges: 'Tallenna muutokset',
     typesHint: 'Jos et valitse yhtään toiminnan tyyppiä, vahti seuraa niitä kaikkia.',
     categories: 'Toiminnan tyyppi',
@@ -343,7 +346,7 @@ const copy = {
     watchEmptyBody: 'Vahti seuraa valitsemaasi aluetta ja kertoo, kun alueelle tulee uusi meluilmoitus. Tiedot pysyvät selaimessasi.',
     addWatch: 'Luo vahti',
     drawArea: 'Piirrä alue kartalle',
-    drawHint: 'Napauta kartalta alueen kulmat. Vähintään kolme kulmaa.',
+    drawHint: 'Lisää kulmia napauttamalla karttaa tai siirrä niitä vetämällä. Vähintään kolme kulmaa.',
     drawUseView: 'Käytä nykyistä karttanäkymää',
     drawUndo: 'Poista viimeisin kulma',
     drawFinish: 'Valmis',
@@ -397,6 +400,9 @@ const copy = {
     approximateLegend: 'White ring: the location is approximate',
     fromPeriod: 'from',
     editWatch: 'Edit',
+    editWatchArea: 'Edit area',
+    editWatchAreaHint: 'Tap the map to add corners or drag them to move them. At least three corners.',
+    editWatchCorner: 'Area corner point',
     saveChanges: 'Save the changes',
     typesHint: 'If you choose no activity types, the area alert monitors all of them.',
     categories: 'Activity type',
@@ -429,7 +435,7 @@ const copy = {
     watchEmptyBody: 'An area alert checks your chosen area for new noise notifications. Its data stays in this browser.',
     addWatch: 'Create an area alert',
     drawArea: 'Draw an area on the map',
-    drawHint: 'Tap the corners of the area on the map. At least three corners.',
+    drawHint: 'Tap the map to add corners or drag them to move them. At least three corners.',
     drawUseView: 'Use the current map view',
     drawUndo: 'Remove the last corner',
     drawFinish: 'Done',
@@ -769,6 +775,14 @@ function App() {
     writeGuards(browserStorage(), next);
   }, []);
 
+  const cancelDraw = useCallback(() => {
+    setDraft((current) => {
+      if (!current?.editing || !current.originalPoints) return null;
+      const { originalPoints, editingArea, ...rest } = current;
+      return { ...rest, points: originalPoints, closed: true };
+    });
+  }, []);
+
   useEffect(() => {
     if (mapRef.current || !mapNode.current) return;
     const map = L.map(mapNode.current, {
@@ -803,7 +817,7 @@ function App() {
   useEffect(() => {
     if (!draft || draft.closed) return undefined;
     const onKey = (event) => {
-      if (event.key === 'Escape') setDraft(null);
+      if (event.key === 'Escape') cancelDraw();
       if (event.key === 'Backspace' && draft.points.length) {
         event.preventDefault();
         setDraft((current) => ({ ...current, points: current.points.slice(0, -1) }));
@@ -811,7 +825,7 @@ function App() {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [draft]);
+  }, [draft, cancelDraw]);
 
   useEffect(() => {
     const layer = draftLayer.current;
@@ -823,12 +837,36 @@ function App() {
     } else if (draft.points.length === 2) {
       layer.addLayer(L.polyline(draft.points, { color: '#2457d6', weight: 2, dashArray: '5 4' }));
     }
-    for (const point of draft.points) {
-      layer.addLayer(L.circleMarker(point, {
-        radius: 5, color: '#2457d6', fillColor: '#fbfaf7', fillOpacity: 1, weight: 2,
-      }));
+    for (const [index, point] of draft.points.entries()) {
+      if (!draft.closed) {
+        const handle = L.marker(point, {
+          draggable: true,
+          keyboard: false,
+          zIndexOffset: 1000,
+          title: `${t.editWatchCorner} ${index + 1}`,
+          icon: L.divIcon({
+            className: 'watch-vertex-handle', iconSize: [18, 18], iconAnchor: [9, 9],
+          }),
+        });
+        handle.on('dragend', (event) => {
+          const latlng = event.target.getLatLng();
+          setDraft((current) => {
+            if (!current || current.closed) return current;
+            // The array index is the polygon's boundary order. Moving a handle
+            // replaces only that vertex, so the saved order remains unchanged.
+            const points = [...current.points];
+            points[index] = [latlng.lat, latlng.lng];
+            return { ...current, points };
+          });
+        });
+        layer.addLayer(handle);
+      } else {
+        layer.addLayer(L.circleMarker(point, {
+          radius: 5, color: '#2457d6', fillColor: '#fbfaf7', fillOpacity: 1, weight: 2,
+        }));
+      }
     }
-  }, [draft]);
+  }, [draft, t]);
 
   useEffect(() => {
     const layer = guardLayer.current;
@@ -903,20 +941,26 @@ function App() {
     const map = mapRef.current;
     if (!map) return;
     const bounds = map.getBounds();
-    setDraft({
+    setDraft((current) => ({
+      ...current,
       points: boundsToPolygon({
         south: bounds.getSouth(), west: bounds.getWest(), north: bounds.getNorth(), east: bounds.getEast(),
       }),
-      name: '',
-      categories: [],
       closed: true,
-    });
+      originalPoints: undefined,
+      editingArea: false,
+    }));
   };
 
   const saveDraft = () => {
     if (draft.editing) {
       persist(guards.map((guard) => (guard.id === draft.editing
-        ? { ...guard, name: draft.name.trim(), categories: draft.categories }
+        ? {
+          ...guard,
+          name: draft.name.trim(),
+          polygon: draft.points,
+          categories: draft.categories,
+        }
         : guard)));
     } else {
       persist([...guards, createGuard({
@@ -940,6 +984,15 @@ function App() {
       closed: true,
       editing: guard.id,
     });
+  };
+
+  const editGuardArea = () => {
+    setDraft((current) => ({
+      ...current,
+      originalPoints: current.points.map((point) => [...point]),
+      closed: false,
+      editingArea: true,
+    }));
   };
 
   const total = visible.length;
@@ -1198,13 +1251,15 @@ function App() {
       )}
 
       {draft && !draft.closed && (
-        <div className="draw-bar" role="region" aria-label={t.drawArea}>
+        <div className="draw-bar" role="region" aria-label={draft.editingArea ? t.editWatchArea : t.drawArea}>
           <p>
-            <strong>{t.drawArea}</strong>
-            <span>{t.drawHint}</span>
+            <strong>{draft.editingArea ? t.editWatchArea : t.drawArea}</strong>
+            <span>{draft.editingArea ? t.editWatchAreaHint : t.drawHint}</span>
           </p>
           <div className="draw-actions">
-            <button type="button" className="ghost" onClick={useCurrentView}>{t.drawUseView}</button>
+            {!draft.editingArea && (
+              <button type="button" className="ghost" onClick={useCurrentView}>{t.drawUseView}</button>
+            )}
             <button
               type="button"
               className="ghost"
@@ -1213,12 +1268,14 @@ function App() {
             >
               {t.drawUndo}
             </button>
-            <button type="button" className="ghost" onClick={() => setDraft(null)}>{t.cancel}</button>
+            <button type="button" className="ghost" onClick={cancelDraw}>{t.cancel}</button>
             <button
               type="button"
               className="primary"
               disabled={draft.points.length < MIN_AREA_POINTS}
-              onClick={() => setDraft({ ...draft, closed: true })}
+              onClick={() => setDraft({
+                ...draft, closed: true, originalPoints: undefined, editingArea: false,
+              })}
             >
               {t.drawFinish}
             </button>
@@ -1234,7 +1291,14 @@ function App() {
           t={t}
           className="centre"
         >
-          <p className="muted">{`${t.watchArea}: ${describeArea(draft.points, t)}`}</p>
+          <div className="watch-area-field">
+            <p className="muted">{`${t.watchArea}: ${describeArea(draft.points, t)}`}</p>
+            {draft.editing && (
+              <button type="button" className="ghost small" onClick={editGuardArea}>
+                <Pencil size={13} aria-hidden="true" /> {t.editWatchArea}
+              </button>
+            )}
+          </div>
           <label className="field" htmlFor="watch-name">
             <span>{t.nameWatch}</span>
             <input
@@ -1319,6 +1383,8 @@ export const styles = `
   .app-shell{position:relative;width:100%;height:100%;background:#dfe3df}
   .map{position:absolute;inset:0;z-index:0}
   .map.drawing{cursor:crosshair}
+  .watch-vertex-handle{border:3px solid #2457d6;border-radius:50%;background:#fbfaf7;box-shadow:0 2px 8px rgba(25,32,28,.28);cursor:grab}
+  .watch-vertex-handle:active{cursor:grabbing}
   .leaflet-container{font-family:inherit;background:#dfe3df}
   .leaflet-control-attribution{font-size:11px!important;background:rgba(251,250,247,.82)!important;color:#545d57!important}
   /* Leaflet ships its own link blue, which reads at 4.6:1 on this background. */
@@ -1430,6 +1496,8 @@ export const styles = `
   .watch-count{margin:8px 0 0;font-size:13px;font-weight:650;color:var(--muted)}
   .watch-count.alert{color:var(--alert)}
   .watch-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .watch-area-field{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+  .watch-area-field .muted{margin:0}
   .empty-watches p{margin:0 0 8px}
   fieldset{margin:14px 0 0;padding:0;border:0}
   legend{padding:0;color:var(--muted);font-size:12px}
