@@ -11,7 +11,10 @@ import {
   pendingByGuard, polygonAreaKm2, readGuards, totalPending, writeGuards,
 } from './guards.js';
 
-const HELSINKI = [60.16986, 24.93838];
+// The city centre sits at Helsinki's southern edge. A slightly north-shifted
+// default keeps the dense central area visible while giving the mainland, rather
+// than the Gulf of Finland, most of the initial viewport.
+const HELSINKI_DEFAULT_CENTER = [60.2, 24.95];
 export const DEFAULT_MAP_ZOOM = 12;
 export const DEFAULT_RANGE_DAYS = 7;
 const DATA_BASE = `${import.meta.env.BASE_URL}data/`;
@@ -786,7 +789,10 @@ function App() {
   useEffect(() => {
     if (mapRef.current || !mapNode.current) return;
     const map = L.map(mapNode.current, {
-      center: HELSINKI, zoom: DEFAULT_MAP_ZOOM, zoomControl: false, attributionControl: true,
+      center: HELSINKI_DEFAULT_CENTER,
+      zoom: DEFAULT_MAP_ZOOM,
+      zoomControl: false,
+      attributionControl: true,
     });
     L.control.zoom({ position: 'bottomleft' }).addTo(map);
     L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
