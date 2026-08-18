@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-08-17T05:01:01.758Z",
+  "generatedAt": "2026-08-18T04:54:54.009Z",
   "totalNotices": 1491,
   "coverage": {
     "from": "1201-07-01",
@@ -11,7 +11,7 @@
     {
       "key": "current",
       "file": "notices-current.json",
-      "from": "2026-07-18",
+      "from": "2026-07-19",
       "to": null,
       "count": 110,
       "hash": "jhuzo1"
