@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import maplibregl from 'maplibre-gl';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   AlertTriangle, Bell, CalendarClock, Check, ChevronDown, ExternalLink, Info,
   LocateFixed, MapPin, Moon, Pencil, RefreshCw, Trash2, X,
@@ -18,6 +18,27 @@ const HELSINKI_DEFAULT_CENTER = [60.2, 24.95];
 export const DEFAULT_MAP_ZOOM = 12;
 export const DEFAULT_RANGE_DAYS = 7;
 const DATA_BASE = `${import.meta.env.BASE_URL}data/`;
+const CARTO_KEY = import.meta.env.VITE_CARTO_KEY || '';
+const CARTO_BASEMAP_STYLE = `https://basemaps.cartocdn.com/gl/positron-gl-style/style.json${CARTO_KEY ? `?key=${CARTO_KEY}` : ''}`;
+const cartoTransformRequest = CARTO_KEY
+  ? (url) => (url.indexOf('basemaps.cartocdn.com') !== -1 && url.indexOf('key=') === -1
+      ? { url: `${url}${url.indexOf('?') !== -1 ? '&' : '?'}key=${CARTO_KEY}` }
+      : { url })
+  : undefined;
+
+// Stored polygons keep Leaflet's [lat, lng] order; MapLibre GeoJSON needs [lng, lat].
+const EMPTY_FC = { type: 'FeatureCollection', features: [] };
+const toLngLat = (point) => [point[1], point[0]];
+const polygonFeature = (points) => ({
+  type: 'Feature',
+  properties: {},
+  geometry: { type: 'Polygon', coordinates: [[...points.map(toLngLat), toLngLat(points[0])]] },
+});
+const lineFeature = (points) => ({
+  type: 'Feature',
+  properties: {},
+  geometry: { type: 'LineString', coordinates: points.map(toLngLat) },
+});
 const CACHE_PREFIX = 'helsinki-melu:v1:';
 const MANIFEST_MAX_AGE = 7 * 24 * 60 * 60 * 1000;
 const CHUNK_MAX_AGE = 30 * 24 * 60 * 60 * 1000;
@@ -538,16 +559,18 @@ function useNoticeData(range) {
 
 /* ------------------------------------------------------------------ markers */
 
-function markerIcon(group) {
+function markerElement(group) {
   const colour = CATEGORY_COLOURS[noticeCategory(group.notices[0])];
   const imprecise = IMPRECISE.has(group.location.precision);
   const count = group.notices.length;
-  return L.divIcon({
-    className: 'melu-marker-wrap',
-    html: `<span class="melu-marker${imprecise ? ' imprecise' : ''}" style="--dot:${colour}">${count > 1 ? count : ''}</span>`,
-    iconSize: [26, 26],
-    iconAnchor: [13, 13],
-  });
+  const wrap = document.createElement('div');
+  wrap.className = 'melu-marker-wrap';
+  const dot = document.createElement('span');
+  dot.className = `melu-marker${imprecise ? ' imprecise' : ''}`;
+  dot.style.setProperty('--dot', colour);
+  dot.textContent = count > 1 ? String(count) : '';
+  wrap.appendChild(dot);
+  return wrap;
 }
 
 /* ----------------------------------------------------------- small elements */
@@ -748,9 +771,9 @@ function App() {
   const { manifest, notices, status, reload } = useNoticeData(range);
   const mapRef = useRef(null);
   const mapNode = useRef(null);
-  const markerLayer = useRef(null);
-  const guardLayer = useRef(null);
-  const draftLayer = useRef(null);
+  const [mapReady, setMapReady] = useState(false);
+  const groupMarkers = useRef([]);
+  const draftMarkers = useRef([]);
 
   const allNotices = useMemo(() => [...notices.values()], [notices]);
   const inRange = useMemo(
@@ -787,22 +810,29 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (mapRef.current || !mapNode.current) return;
-    const map = L.map(mapNode.current, {
-      center: HELSINKI_DEFAULT_CENTER,
+    if (mapRef.current || !mapNode.current) return undefined;
+    const map = new maplibregl.Map({
+      container: mapNode.current,
+      style: CARTO_BASEMAP_STYLE,
+      center: [HELSINKI_DEFAULT_CENTER[1], HELSINKI_DEFAULT_CENTER[0]],
       zoom: DEFAULT_MAP_ZOOM,
-      zoomControl: false,
-      attributionControl: true,
+      attributionControl: { customAttribution: '&copy; OpenStreetMap, &copy; CARTO' },
+      transformRequest: cartoTransformRequest,
     });
-    L.control.zoom({ position: 'bottomleft' }).addTo(map);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap, &copy; CARTO',
-      maxZoom: 19,
-    }).addTo(map);
-    guardLayer.current = L.layerGroup().addTo(map);
-    draftLayer.current = L.layerGroup().addTo(map);
-    markerLayer.current = L.layerGroup().addTo(map);
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false, visualizePitch: false }), 'bottom-left');
+    map.on('load', () => {
+      // Watch areas and the in-progress draft are drawn as GeoJSON layers whose
+      // data is swapped out by the effects below; vertices are separate markers.
+      map.addSource('guard-areas', { type: 'geojson', data: EMPTY_FC });
+      map.addLayer({ id: 'guard-fill', type: 'fill', source: 'guard-areas', paint: { 'fill-color': '#1d2923', 'fill-opacity': 0.05 } });
+      map.addLayer({ id: 'guard-line', type: 'line', source: 'guard-areas', paint: { 'line-color': '#1d2923', 'line-width': 1.5 } });
+      map.addSource('draft-area', { type: 'geojson', data: EMPTY_FC });
+      map.addLayer({ id: 'draft-fill', type: 'fill', source: 'draft-area', filter: ['==', '$type', 'Polygon'], paint: { 'fill-color': '#2457d6', 'fill-opacity': 0.08 } });
+      map.addLayer({ id: 'draft-line', type: 'line', source: 'draft-area', paint: { 'line-color': '#2457d6', 'line-width': 2, 'line-dasharray': [4, 3] } });
+      setMapReady(true);
+    });
     mapRef.current = map;
+    return () => { setMapReady(false); map.remove(); mapRef.current = null; };
   }, []);
 
   // Drawing: each map click adds a corner.
@@ -813,12 +843,12 @@ function App() {
       if (!draft || draft.closed) return;
       setDraft((current) => ({
         ...current,
-        points: [...current.points, [event.latlng.lat, event.latlng.lng]],
+        points: [...current.points, [event.lngLat.lat, event.lngLat.lng]],
       }));
     };
     map.on('click', onClick);
     return () => { map.off('click', onClick); };
-  }, [draft]);
+  }, [draft, mapReady]);
 
   useEffect(() => {
     if (!draft || draft.closed) return undefined;
@@ -834,90 +864,80 @@ function App() {
   }, [draft, cancelDraw]);
 
   useEffect(() => {
-    const layer = draftLayer.current;
-    if (!layer) return;
-    layer.clearLayers();
-    if (!draft?.points.length) return;
-    if (draft.points.length >= MIN_AREA_POINTS) {
-      layer.addLayer(L.polygon(draft.points, { color: '#2457d6', weight: 2, fillOpacity: 0.08, dashArray: '5 4' }));
-    } else if (draft.points.length === 2) {
-      layer.addLayer(L.polyline(draft.points, { color: '#2457d6', weight: 2, dashArray: '5 4' }));
+    const map = mapRef.current;
+    if (!map || !mapReady) return undefined;
+    const source = map.getSource('draft-area');
+    const points = draft?.points || [];
+    if (source) {
+      if (points.length >= MIN_AREA_POINTS) source.setData(polygonFeature(points));
+      else if (points.length === 2) source.setData(lineFeature(points));
+      else source.setData(EMPTY_FC);
     }
-    for (const [index, point] of draft.points.entries()) {
+    draftMarkers.current.forEach((marker) => marker.remove());
+    draftMarkers.current = [];
+    if (!draft || !points.length) return undefined;
+    points.forEach((point, index) => {
+      const element = document.createElement('div');
       if (!draft.closed) {
-        const handle = L.marker(point, {
-          draggable: true,
-          keyboard: false,
-          zIndexOffset: 1000,
-          title: `${t.editWatchCorner} ${index + 1}`,
-          icon: L.divIcon({
-            className: 'watch-vertex-handle', iconSize: [18, 18], iconAnchor: [9, 9],
-          }),
-        });
-        handle.on('dragend', (event) => {
-          const latlng = event.target.getLatLng();
+        element.className = 'watch-vertex-handle';
+        element.title = `${t.editWatchCorner} ${index + 1}`;
+        const handle = new maplibregl.Marker({ element, draggable: true }).setLngLat(toLngLat(point)).addTo(map);
+        handle.on('dragend', () => {
+          const { lng, lat } = handle.getLngLat();
           setDraft((current) => {
             if (!current || current.closed) return current;
             // The array index is the polygon's boundary order. Moving a handle
             // replaces only that vertex, so the saved order remains unchanged.
-            const points = [...current.points];
-            points[index] = [latlng.lat, latlng.lng];
-            return { ...current, points };
+            const next = [...current.points];
+            next[index] = [lat, lng];
+            return { ...current, points: next };
           });
         });
-        layer.addLayer(handle);
+        draftMarkers.current.push(handle);
       } else {
-        layer.addLayer(L.circleMarker(point, {
-          radius: 5, color: '#2457d6', fillColor: '#fbfaf7', fillOpacity: 1, weight: 2,
-        }));
+        element.className = 'watch-vertex-dot';
+        draftMarkers.current.push(new maplibregl.Marker({ element }).setLngLat(toLngLat(point)).addTo(map));
       }
-    }
-  }, [draft, t]);
+    });
+    return undefined;
+  }, [draft, t, mapReady]);
 
   useEffect(() => {
-    const layer = guardLayer.current;
-    if (!layer) return;
-    layer.clearLayers();
-    if (panel !== 'watches') return;
-    for (const guard of guards) {
-      layer.addLayer(L.polygon(guard.polygon, {
-        color: '#1d2923', weight: 1.5, fillOpacity: 0.05, interactive: false,
-      }));
-    }
-  }, [guards, panel]);
+    const map = mapRef.current;
+    if (!map || !mapReady) return;
+    const source = map.getSource('guard-areas');
+    if (!source) return;
+    if (panel !== 'watches') { source.setData(EMPTY_FC); return; }
+    source.setData({ type: 'FeatureCollection', features: guards.map((guard) => polygonFeature(guard.polygon)) });
+  }, [guards, panel, mapReady]);
 
   useEffect(() => {
-    const layer = markerLayer.current;
-    if (!layer) return;
-    layer.clearLayers();
+    const map = mapRef.current;
+    if (!map || !mapReady) return undefined;
+    groupMarkers.current.forEach((marker) => marker.remove());
+    groupMarkers.current = [];
     for (const group of groups) {
       const label = markerLabel(group, t);
-      const marker = L.marker([group.location.lat, group.location.lon], {
-        icon: markerIcon(group),
-        keyboard: true,
-        title: label,
-        alt: label,
+      const element = markerElement(group);
+      element.setAttribute('role', 'button');
+      element.tabIndex = 0;
+      element.title = label;
+      element.setAttribute('aria-label', label);
+      const select = () => setSelectedKey(group.key);
+      element.addEventListener('click', select);
+      element.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          select();
+        }
       });
-      marker.on('click', () => setSelectedKey(group.key));
-      marker.on('keypress', (event) => {
-        if (event.originalEvent.key === 'Enter') setSelectedKey(group.key);
-      });
-      layer.addLayer(marker);
-      // The alt option only reaches image icons, so a divIcon marker has to be
-      // labelled on the element itself.
-      const element = marker.getElement();
-      if (element) {
-        element.setAttribute('aria-label', label);
-        // Leaflet listens for keypress, which Space does not fire.
-        element.addEventListener('keydown', (event) => {
-          if (event.key === ' ') {
-            event.preventDefault();
-            setSelectedKey(group.key);
-          }
-        });
-      }
+      const marker = new maplibregl.Marker({ element, anchor: 'center' })
+        .setLngLat([group.location.lon, group.location.lat])
+        .addTo(map);
+      groupMarkers.current.push(marker);
     }
-  }, [groups, t]);
+    return undefined;
+  }, [groups, t, mapReady]);
 
   useEffect(() => {
     if (selectedKey && !groups.some((group) => group.key === selectedKey)) setSelectedKey(null);
@@ -926,7 +946,7 @@ function App() {
   const locateMe = useCallback(() => {
     if (!navigator.geolocation || !mapRef.current) return;
     navigator.geolocation.getCurrentPosition(
-      (position) => mapRef.current.setView([position.coords.latitude, position.coords.longitude], 14),
+      (position) => mapRef.current.flyTo({ center: [position.coords.longitude, position.coords.latitude], zoom: 14 }),
       () => {},
       { enableHighAccuracy: false, timeout: 8000 },
     );
@@ -1388,15 +1408,17 @@ export const styles = `
 
   .app-shell{position:relative;width:100%;height:100%;background:#dfe3df}
   .map{position:absolute;inset:0;z-index:0}
-  .map.drawing{cursor:crosshair}
-  .watch-vertex-handle{border:3px solid #2457d6;border-radius:50%;background:#fbfaf7;box-shadow:0 2px 8px rgba(25,32,28,.28);cursor:grab}
+  .map.drawing .maplibregl-canvas{cursor:crosshair}
+  .melu-marker-wrap{cursor:pointer}
+  .watch-vertex-handle{width:18px;height:18px;border:3px solid #2457d6;border-radius:50%;background:#fbfaf7;box-shadow:0 2px 8px rgba(25,32,28,.28);cursor:grab}
   .watch-vertex-handle:active{cursor:grabbing}
-  .leaflet-container{font-family:inherit;background:#dfe3df}
-  .leaflet-control-attribution{font-size:11px!important;background:rgba(251,250,247,.82)!important;color:#545d57!important}
-  /* Leaflet ships its own link blue, which reads at 4.6:1 on this background. */
-  .leaflet-control-attribution a{color:var(--blue)!important}
-  .leaflet-control-zoom{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;margin:0 0 18px 18px!important}
-  .leaflet-control-zoom a{border:0!important;color:#19201c!important;background:#faf9f5!important}
+  .watch-vertex-dot{width:10px;height:10px;border:2px solid #2457d6;border-radius:50%;background:#fbfaf7}
+  .maplibregl-map{font-family:inherit;background:#dfe3df}
+  .maplibregl-ctrl-attrib{font-size:11px!important;background:rgba(251,250,247,.82)!important;color:#545d57!important}
+  .maplibregl-ctrl-attrib a{color:var(--blue)!important}
+  .maplibregl-ctrl-bottom-left .maplibregl-ctrl{margin:0 0 18px 18px!important}
+  .maplibregl-ctrl-group{border:0!important;box-shadow:0 8px 30px rgba(18,27,22,.14)!important;background:#faf9f5!important}
+  .maplibregl-ctrl-group button{color:#19201c!important;background:#faf9f5!important}
 
   /* No overflow:hidden here. The period popover is a descendant and hangs below
      the bar, so clipping the bar clipped 79% of the popover away, including the
@@ -1548,7 +1570,7 @@ export const styles = `
     .panel.behind{display:none}
     .info-trigger{right:12px;bottom:12px}
     .draw-bar{left:12px;right:12px;bottom:88px;width:auto;transform:none}
-    .leaflet-control-zoom{margin:0 0 12px 12px!important}
+    .maplibregl-ctrl-bottom-left .maplibregl-ctrl{margin:0 0 12px 12px!important}
   }
 
   /* Only at phone width is the bar wide enough to be worth filling; above that a

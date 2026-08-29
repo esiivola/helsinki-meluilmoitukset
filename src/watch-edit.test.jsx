@@ -4,50 +4,46 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { GUARDS_KEY } from './guards.js';
 
-const leafletState = vi.hoisted(() => ({
+const mapState = vi.hoisted(() => ({
   bounds: { south: 60.18, west: 24.96, north: 60.20, east: 25.00 },
   draggableMarkers: [],
   handlers: {},
 }));
 
-vi.mock('leaflet', () => {
-  const addable = () => ({ addTo() { return this; } });
-  const layerGroup = () => ({ ...addable(), addLayer: vi.fn(), clearLayers: vi.fn() });
-  const map = {
-    getBounds: () => ({
-      getSouth: () => leafletState.bounds.south,
-      getWest: () => leafletState.bounds.west,
-      getNorth: () => leafletState.bounds.north,
-      getEast: () => leafletState.bounds.east,
-    }),
-    on: vi.fn((event, handler) => { leafletState.handlers[event] = handler; }),
-    off: vi.fn((event) => { delete leafletState.handlers[event]; }),
-  };
-  return {
-    default: {
-      circleMarker: vi.fn((point, options) => ({ point, options })),
-      control: { zoom: vi.fn(() => addable()) },
-      divIcon: vi.fn((options) => options),
-      layerGroup: vi.fn(layerGroup),
-      map: vi.fn(() => map),
-      marker: vi.fn((point, options = {}) => {
-        const handlers = {};
-        const marker = {
-          getElement: () => null,
-          getLatLng: () => ({ lat: point[0], lng: point[1] }),
-          on: vi.fn((event, handler) => { handlers[event] = handler; return marker; }),
-          options,
-          point,
-          handlers,
-        };
-        if (options.draggable) leafletState.draggableMarkers.push(marker);
-        return marker;
-      }),
-      polygon: vi.fn((points, options) => ({ points, options })),
-      polyline: vi.fn((points, options) => ({ points, options })),
-      tileLayer: vi.fn(() => addable()),
-    },
-  };
+vi.mock('maplibre-gl', () => {
+  class Marker {
+    constructor(options = {}) {
+      this.options = options;
+      this.draggable = !!options.draggable;
+      this.handlers = {};
+      this._lngLat = { lng: 0, lat: 0 };
+    }
+    // MapLibre takes [lng, lat]; expose `point` as [lat, lng] to match storage.
+    setLngLat(ll) { this._lngLat = { lng: ll[0], lat: ll[1] }; this.point = [ll[1], ll[0]]; return this; }
+    addTo() { if (this.draggable) mapState.draggableMarkers.push(this); return this; }
+    on(event, handler) { this.handlers[event] = handler; return this; }
+    getLngLat() { return this._lngLat; }
+    remove() {}
+  }
+  class Map {
+    addControl() { return this; }
+    on(event, handler) { if (event === 'load') handler(); else mapState.handlers[event] = handler; return this; }
+    off(event) { delete mapState.handlers[event]; return this; }
+    addSource() {}
+    addLayer() {}
+    getSource() { return { setData() {} }; }
+    getBounds() {
+      return {
+        getSouth: () => mapState.bounds.south,
+        getWest: () => mapState.bounds.west,
+        getNorth: () => mapState.bounds.north,
+        getEast: () => mapState.bounds.east,
+      };
+    }
+    flyTo() {}
+    remove() {}
+  }
+  return { default: { Map, Marker, NavigationControl: class {}, AttributionControl: class {} } };
 });
 
 import App from './main.jsx';
@@ -96,8 +92,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  leafletState.draggableMarkers = [];
-  leafletState.handlers = {};
+  mapState.draggableMarkers = [];
+  mapState.handlers = {};
 });
 
 describe('editing a watch area', () => {
@@ -109,17 +105,17 @@ describe('editing a watch area', () => {
     fireEvent.click(within(editor).getByRole('button', { name: 'Muokkaa aluetta' }));
     expect(screen.getByRole('region', { name: 'Muokkaa aluetta' })).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'Käytä nykyistä karttanäkymää' })).toBeNull();
-    expect(leafletState.draggableMarkers.map((marker) => marker.point)).toEqual(ORIGINAL_AREA);
+    expect(mapState.draggableMarkers.map((marker) => marker.point)).toEqual(ORIGINAL_AREA);
 
     const movedPoint = { lat: 60.165, lng: 24.945 };
     act(() => {
-      leafletState.draggableMarkers[1].handlers.dragend({
-        target: { getLatLng: () => movedPoint },
-      });
+      const handle = mapState.draggableMarkers[1];
+      handle._lngLat = { lng: movedPoint.lng, lat: movedPoint.lat };
+      handle.handlers.dragend();
     });
     const addedPoint = { lat: 60.175, lng: 24.925 };
     act(() => {
-      leafletState.handlers.click({ latlng: addedPoint });
+      mapState.handlers.click({ lngLat: addedPoint });
     });
     fireEvent.click(screen.getByRole('button', { name: 'Valmis' }));
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Muokkaa' }))
@@ -146,9 +142,9 @@ describe('editing a watch area', () => {
     fireEvent.click(within(screen.getByRole('dialog', { name: 'Muokkaa' }))
       .getByRole('button', { name: 'Muokkaa aluetta' }));
     act(() => {
-      leafletState.draggableMarkers[0].handlers.dragend({
-        target: { getLatLng: () => ({ lat: 60.15, lng: 24.91 }) },
-      });
+      const handle = mapState.draggableMarkers[0];
+      handle._lngLat = { lng: 24.91, lat: 60.15 };
+      handle.handlers.dragend();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Peruuta' }));
 
@@ -171,14 +167,15 @@ describe('editing a watch area', () => {
       { lat: 60.19, lng: 24.94 },
     ];
     for (const point of points) {
-      act(() => { leafletState.handlers.click({ latlng: point }); });
+      act(() => { mapState.handlers.click({ lngLat: point }); });
     }
 
-    const currentHandles = leafletState.draggableMarkers.slice(-points.length);
+    const currentHandles = mapState.draggableMarkers.slice(-points.length);
     expect(currentHandles.map((marker) => marker.point)).toEqual(points.map(({ lat, lng }) => [lat, lng]));
     const movedPoint = { lat: 60.185, lng: 24.915 };
     act(() => {
-      currentHandles[0].handlers.dragend({ target: { getLatLng: () => movedPoint } });
+      currentHandles[0]._lngLat = { lng: movedPoint.lng, lat: movedPoint.lat };
+      currentHandles[0].handlers.dragend();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Valmis' }));
     fireEvent.click(screen.getByRole('button', { name: 'Tallenna vahti' }));

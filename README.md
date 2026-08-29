@@ -126,6 +126,32 @@ node scripts/update-noise-data.mjs --backfill
 `main`-haaraan viedyt muutokset testataan, rakennetaan ja julkaistaan automaattisesti
 GitHub Pagesiin.
 
+## Taustakartta ja CARTO API-avain
+
+Taustakartta käyttää CARTOn vektoritiiliä (positron-tyyli, MapLibre GL). CARTO vaatii
+nykyään API-avaimen, ja avain luetaan käännösaikana ympäristömuuttujasta `VITE_CARTO_KEY`.
+
+Koska sovellus on täysin selainpohjainen staattinen sivusto, avain päätyy väistämättä
+selaimen lataamaan pakettiin – sitä **ei voi piilottaa** GitHub Pagesissa, ei myöskään
+CI-salaisuudella. Suojaus perustuu siihen, että avain rajataan CARTOn hallinnasta
+toimimaan vain sallituista verkkotunnuksista (allowed referers), esimerkiksi
+oma `github.io`-osoite ja `localhost` (paikallinen kehitys). Näin julkinenkin avain on
+hyödytön muille. Ilmaistaso: 5 milj. tiilipyyntöä/kk.
+
+**Paikallinen kehitys:** luo `.env.local` (gitignoressa):
+
+```bash
+VITE_CARTO_KEY=oma_avaimesi
+```
+
+**Julkaisu (GitHub Actions):** lisää avain repositorion muuttujaksi nimellä `CARTO_KEY`
+(Settings → Secrets and variables → Actions → Variables). Työnkulku `deploy-pages.yml`
+välittää sen käännökseen muuttujana `VITE_CARTO_KEY`. Muuttuja (variable) riittää
+salaisuuden (secret) sijaan, koska avain on joka tapauksessa julkinen – suojana on
+verkkotunnusrajaus.
+
+Ilman avainta sovellus toimii, mutta taustakartta jää tyhjäksi tai vesileimatuksi.
+
 ## Tekijä
 
 [Eero Siivola](https://esiivola.github.io/)

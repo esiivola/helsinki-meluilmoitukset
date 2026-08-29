@@ -3,21 +3,26 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
-vi.mock('leaflet', () => {
-  const layer = () => ({
-    addLayer: vi.fn(),
-    addTo: vi.fn(function addTo() { return this; }),
-    clearLayers: vi.fn(),
-  });
-  const map = { off: vi.fn(), on: vi.fn() };
-  return {
-    default: {
-      control: { zoom: vi.fn(() => layer()) },
-      layerGroup: vi.fn(() => layer()),
-      map: vi.fn(() => map),
-      tileLayer: vi.fn(() => layer()),
-    },
-  };
+vi.mock('maplibre-gl', () => {
+  class Marker {
+    setLngLat() { return this; }
+    addTo() { return this; }
+    on() { return this; }
+    getLngLat() { return { lng: 0, lat: 0 }; }
+    remove() {}
+  }
+  class Map {
+    addControl() { return this; }
+    on(event, cb) { if (event === 'load') cb(); return this; }
+    off() { return this; }
+    addSource() {}
+    addLayer() {}
+    getSource() { return { setData() {} }; }
+    getBounds() { return { getWest: () => 0, getSouth: () => 0, getEast: () => 0, getNorth: () => 0 }; }
+    flyTo() {}
+    remove() {}
+  }
+  return { default: { Map, Marker, NavigationControl: class {}, AttributionControl: class {} } };
 });
 
 import App from './main.jsx';

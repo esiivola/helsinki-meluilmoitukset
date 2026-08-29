@@ -3,26 +3,29 @@ import React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render } from '@testing-library/react';
 
-const leafletState = vi.hoisted(() => ({ mapOptions: null }));
+const mapState = vi.hoisted(() => ({ mapOptions: null }));
 
-vi.mock('leaflet', () => {
-  const layer = () => ({
-    addLayer: vi.fn(),
-    addTo: vi.fn(function addTo() { return this; }),
-    clearLayers: vi.fn(),
-  });
-  const map = { off: vi.fn(), on: vi.fn() };
-  return {
-    default: {
-      control: { zoom: vi.fn(() => layer()) },
-      layerGroup: vi.fn(() => layer()),
-      map: vi.fn((node, options) => {
-        leafletState.mapOptions = options;
-        return map;
-      }),
-      tileLayer: vi.fn(() => layer()),
-    },
-  };
+vi.mock('maplibre-gl', () => {
+  class Marker {
+    setLngLat() { return this; }
+    addTo() { return this; }
+    on() { return this; }
+    getLngLat() { return { lng: 0, lat: 0 }; }
+    remove() {}
+  }
+  class Map {
+    constructor(options) { mapState.mapOptions = options; }
+    addControl() { return this; }
+    on(event, cb) { if (event === 'load') cb(); return this; }
+    off() { return this; }
+    addSource() {}
+    addLayer() {}
+    getSource() { return { setData() {} }; }
+    getBounds() { return { getWest: () => 0, getSouth: () => 0, getEast: () => 0, getNorth: () => 0 }; }
+    flyTo() {}
+    remove() {}
+  }
+  return { default: { Map, Marker, NavigationControl: class {}, AttributionControl: class {} } };
 });
 
 import App, { DEFAULT_MAP_ZOOM } from './main.jsx';
@@ -30,7 +33,7 @@ import App, { DEFAULT_MAP_ZOOM } from './main.jsx';
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  leafletState.mapOptions = null;
+  mapState.mapOptions = null;
 });
 
 describe('initial map placement', () => {
@@ -38,8 +41,9 @@ describe('initial map placement', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<App />);
 
-    expect(leafletState.mapOptions).toMatchObject({
-      center: [60.2, 24.95],
+    // MapLibre uses [lng, lat] order.
+    expect(mapState.mapOptions).toMatchObject({
+      center: [24.95, 60.2],
       zoom: DEFAULT_MAP_ZOOM,
     });
   });
