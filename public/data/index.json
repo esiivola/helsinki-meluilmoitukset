@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-11T11:56:11.033Z",
-  "totalNotices": 1540,
+  "generatedAt": "2026-11-12T12:51:13.228Z",
+  "totalNotices": 1541,
   "coverage": {
     "from": "1201-07-01",
     "to": "2030-11-30"
@@ -11,10 +11,10 @@
     {
       "key": "current",
       "file": "notices-current.json",
-      "from": "2026-10-12",
+      "from": "2026-10-13",
       "to": null,
-      "count": 97,
-      "hash": "bhlqca"
+      "count": 98,
+      "hash": "fmu1j6"
     },
     {
       "key": "2030",
@@ -53,8 +53,8 @@
       "file": "notices-2026.json",
       "from": "2026-01-01",
       "to": "2026-12-31",
-      "count": 235,
-      "hash": "1xq6t3b"
+      "count": 236,
+      "hash": "1eb0cl5"
     },
     {
       "key": "2025",
